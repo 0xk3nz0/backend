@@ -1,0 +1,43 @@
+{
+  "name": "[Pong Rush] ft_backend",
+  "version": "0.0.1",
+  "description": "backend API for ft_transcendence",
+  "main": "src/app.js",
+  "scripts": {
+    "dev": "nodemon"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iTsLhaj/backend.git"
+  },
+  "keywords": [
+    "42",
+    "REST",
+    "API",
+    "KHARJA",
+    "BL",
+    "JABADOR",
+    "FASTIFY",
+    "TS",
+    "CHEBA",
+    "WERDA",
+    "NODE"
+  ],
+  "author": "LH4J & Heisenberg",
+  "license": "GNU General Public License v3.0",
+  "bugs": {
+    "url": "https://github.com/iTsLhaj/backend/issues"
+  },
+  "homepage": "https://github.com/iTsLhaj/backend#readme",
+  "devDependencies": {
+    "@prisma/client": "^6.15.0",
+    "@types/node": "^24.3.0",
+    "fastify": "^5.5.0",
+    "nodemon": "^3.1.10",
+    "pino-pretty": "^13.1.1",
+    "prisma": "^6.15.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.2"
+  },
+  "type": "module"
+}
