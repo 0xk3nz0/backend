@@ -4,7 +4,7 @@
 
 ## Development Workflow
 
-<div style="display: flex; align-items: flex-start;">
+<div align="center">
 
   <!-- Table of Contents -->
   <div align="left" style="flex: 1;">
