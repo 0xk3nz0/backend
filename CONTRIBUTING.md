@@ -27,7 +27,7 @@
 
 </div>
 
----
+<br/>
 
 ### Branch Structure 🌿
 
