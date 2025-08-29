@@ -7,7 +7,7 @@
 <div style="display: flex; align-items: flex-start;">
 
   <!-- Table of Contents -->
-  <div style="flex: 1;">
+  <div align="left" style="flex: 1;">
     <h3>Table of Contents</h2>
     <ul>
       <li><a href="#branch-structure-">Branch Structure</a></li>
@@ -25,7 +25,7 @@
   </div>
 
   <!-- Image -->
-  <div style="flex: 1;">
+  <div align="right" style="flex: 1;">
     <img src="https://media.discordapp.net/attachments/1157749771130372217/1410735291425226752/dfa57a5ffe3d57591499b4d9a9588e35.webp?ex=68b2c1df&is=68b1705f&hm=ae8137533c8a2fe4a981d65b66309ed78bcbbb4364141482965577a8164a96b1&=&format=webp" alt="fr3atni-repo" style="max-width: 100%;" height="380">
   </div>
 
