@@ -10,12 +10,6 @@ const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
 
 /// ...
 
-fastify.get('/', (req: FastifyRequest, res: FastifyReply) => {
-    res.send({
-        message: "boilerplate is working!"
-    });
-});
-
 fastify.addHook('onClose', CloseHandler);
 fastify.addHook('onSend', SendHandler);
 
