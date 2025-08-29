@@ -6,7 +6,7 @@
 
 <div align="center">
 
-<img src="https://media.discordapp.net/attachments/1157749771130372217/1410735291425226752/dfa57a5ffe3d57591499b4d9a9588e35.webp?ex=68b2c1df&is=68b1705f&hm=ae8137533c8a2fe4a981d65b66309ed78bcbbb4364141482965577a8164a96b1&=&format=webp" alt="fr3atni-repo" height="380" align="right">
+<img src="https://media.discordapp.net/attachments/1157749771130372217/1410735291425226752/dfa57a5ffe3d57591499b4d9a9588e35.webp?ex=68b2c1df&is=68b1705f&hm=ae8137533c8a2fe4a981d65b66309ed78bcbbb4364141482965577a8164a96b1&=&format=webp" alt="fr3atni-repo" height="400" width="400" align="right">
 
 <div align="left">
   <h3>Table of Contents</h2>
