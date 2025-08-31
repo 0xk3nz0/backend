@@ -5,6 +5,7 @@ import CloseHandler from './hooks/close.js';
 import SendHandler from './hooks/send.js'
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import UserRoutes from './routes/user.js';
+import ServiceManagerPlugin from './plugins/service.js';
 
 
 
@@ -15,6 +16,8 @@ fastify.log.info('Prisma connected ✅');
 
 fastify.addHook('onClose', CloseHandler);
 fastify.addHook('onSend', SendHandler);
+
+fastify.register(ServiceManagerPlugin);
 
 fastify.register(UserRoutes, { prefix: '/v1/user' });
 

@@ -125,7 +125,6 @@ export default class UserService extends DataBaseWrapper {
      * @returns An array of all UserModel objects
      */
     async fetchAll(): Promise<Array<UserModel | null>> {
-        this.fastify.log.debug("WAAAAL9LAAAWIIII !!!");
         return await this.prisma.user.findMany();
     }
 
