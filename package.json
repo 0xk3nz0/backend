@@ -4,7 +4,8 @@
   "description": "backend API for ft_transcendence",
   "main": "src/app.js",
   "scripts": {
-    "dev": "nodemon"
+    "dev": "nodemon",
+    "test": "vitest run"
   },
   "repository": {
     "type": "git",
@@ -32,13 +33,15 @@
   "devDependencies": {
     "@prisma/client": "^6.15.0",
     "@types/node": "^24.3.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "fastify": "^5.5.0",
     "fastify-plugin": "^5.0.1",
     "nodemon": "^3.1.10",
     "pino-pretty": "^13.1.1",
     "prisma": "^6.15.0",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   },
   "type": "module",
   "dependencies": {
