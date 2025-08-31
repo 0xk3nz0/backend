@@ -6,20 +6,34 @@ import { Prisma } from "../generated/prisma/index.js";
 
 
 
+/**
+ * UserService
+ *
+ * Provides high-level database operations for the `User` entity,
+ * abstracting direct PrismaClient calls behind a service layer.
+ *
+ * Responsibilities:
+ * - Create, update, delete, and query user records in the database.
+ * - Ensure consistent error handling and logging for Prisma operations.
+ * - Return simple, predictable values (`true`/`false`, `null`, or results)
+ *   instead of propagating raw Prisma exceptions.
+ *
+ * This service extends {@link DataBaseWrapper} to reuse a shared PrismaClient
+ * instance and Fastify logger, making it suitable for integration as part of
+ * the Fastify service layer (e.g. via decorators or a service container).
+ */
 export default class UserService extends DataBaseWrapper {
 
-    /**
-     * Initializes the UserService with a Fastify instance and service name.
-     * @param fastify - Fastify instance for logging and dependency injection
-     */
     constructor(fastify: FastifyInstance) {
         super('user.service', fastify);
     }
 
     /**
-     * Internal error handler for Prisma operations.
-     * Logs errors from PrismaClientKnownRequestError and generic Errors.
-     * @param error - The error object caught from a Prisma operation
+     * Handles and logs errors that occur during Prisma operations.
+     * Differentiates between known Prisma errors (e.g. P2025: record not found),
+     * generic JS errors, and unknown error types.
+     *
+     * @param error - The error thrown by a Prisma query or runtime issue.
      */
     private _handleError(error: any | unknown): void {
         if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -36,11 +50,12 @@ export default class UserService extends DataBaseWrapper {
     }
 
     /**
-     * Creates a new user in the database.
-     * @param user - UserModel object containing user data
-     * @returns `true` if the user was created successfully, `false` if an error occurred
+     * Creates a new user record in the database.
+     *
+     * @param user - User data to insert.
+     * @returns `true` if creation succeeded, otherwise `false`.
      */
-    async create(user: UserModel): Promise<boolean> {
+    public async create(user: UserModel): Promise<boolean> {
         try {
             await this.prisma.user.create({ data: { ...user } });
             return true;
@@ -51,24 +66,18 @@ export default class UserService extends DataBaseWrapper {
     }
 
     /**
-     * Updates a specific field of a user identified by a unique key.
-     * @param f_key - Unique field to identify the user (e.g., "id" or "email")
-     * @param f_val - Value of the unique field
-     * @param key - Field to update
-     * @param val - New value for the field
-     * @returns `true` if the update was successful, `false` if an error occurred
+     * Updates an existing user by a unique identifier.
+     *
+     * @param where - Unique condition (e.g. `{ id: "uuid" }`, `{ email: "foo@bar.com" }`).
+     * @param data - Fields and values to update.
+     * @returns `true` if the update succeeded, otherwise `false`.
      */
-    async updateBy<K extends keyof Prisma.UserWhereUniqueInput>(
-        f_key: K,
-        f_val: Prisma.UserWhereUniqueInput[K],
-        key: K,
-        val: Prisma.UserWhereUniqueInput[K]
+    public async updateBy(
+        where: Prisma.UserWhereUniqueInput,
+        data: Prisma.UserUpdateInput
     ): Promise<boolean> {
         try {
-            await this.prisma.user.update({
-                where: { [f_key]: f_val } as unknown as Prisma.UserWhereUniqueInput,
-                data: { [key]: val as unknown as Prisma.UserWhereUniqueInput }
-            });
+            await this.prisma.user.update({ where, data });
             return true;
         } catch (error) {
             this._handleError(error);
@@ -77,19 +86,16 @@ export default class UserService extends DataBaseWrapper {
     }
 
     /**
-     * Deletes a user from the database by a unique field.
-     * @param key - Unique field to identify the user (e.g., "id" or "email")
-     * @param val - Value of the unique field
-     * @returns `true` if deletion succeeded, `false` otherwise
+     * Deletes a single user by a unique identifier.
+     *
+     * @param where - Unique condition (e.g. `{ id: "uuid" }`, `{ email: "foo@bar.com" }`).
+     * @returns `true` if the deletion succeeded, otherwise `false`.
      */
-    async deleteBy<K extends keyof Prisma.UserWhereUniqueInput>(
-        key: K,
-        val: Prisma.UserWhereUniqueInput[K]
+    public async deleteBy(
+        where: Prisma.UserWhereUniqueInput
     ): Promise<boolean> {
         try {
-            await this.prisma.user.delete({
-                where: { [key]: val } as unknown as Prisma.UserWhereUniqueInput
-            });
+            await this.prisma.user.delete({ where });
             return true;
         } catch (error) {
             this._handleError(error);
@@ -98,49 +104,65 @@ export default class UserService extends DataBaseWrapper {
     }
 
     /**
-     * Deletes all users from the database.
-     * @returns The number of users that were deleted
+     * Deletes all user records from the database.
+     *
+     * @returns The number of deleted records, or `null` if an error occurred.
      */
-    async deleteAll(): Promise<number> {
-        return (await this.prisma.user.deleteMany()).count;
+    public async deleteAll(): Promise<number | null> {
+        try {
+            return (await this.prisma.user.deleteMany()).count;
+        } catch (error) {
+            this._handleError(error);
+            return null;
+        }
     }
 
     /**
-     * Fetches a single user by a unique field.
-     * @param key - Unique field to identify the user
-     * @param val - Value of the unique field
-     * @returns The matching UserModel if found, otherwise `null`
+     * Fetches a single user by a unique identifier.
+     *
+     * @param where - Unique condition (e.g. `{ id: "uuid" }`, `{ email: "foo@bar.com" }`).
+     * @returns A `UserModel` if found, otherwise `null`.
      */
-    async fetchBy<K extends keyof Prisma.UserWhereUniqueInput>(
-        key: K,
-        val: Prisma.UserWhereUniqueInput[K]
+    public async fetchBy(
+        where: Prisma.UserWhereUniqueInput
     ): Promise<UserModel | null> {
-        return await this.prisma.user.findUnique({
-            where: { [key]: val } as unknown as Prisma.UserWhereUniqueInput
-        });
+        try {
+            return await this.prisma.user.findUnique({ where });
+        } catch (error) {
+            this._handleError(error);
+            return null;
+        }
     }
 
     /**
-     * Fetches all users from the database.
-     * @returns An array of all UserModel objects
+     * Fetches all users in the database.
+     *
+     * @returns An array of `UserModel` objects, or `null` if an error occurred.
      */
-    async fetchAll(): Promise<Array<UserModel | null>> {
-        return await this.prisma.user.findMany();
+    public async fetchAll(): Promise<Array<UserModel | null> | null> {
+        try {
+            return await this.prisma.user.findMany();
+        } catch (error) {
+            this._handleError(error);
+            return null;
+        }
     }
 
     /**
-     * Fetches users filtered by a non-unique field.
-     * @param key - Field to filter by (e.g., "role" or "isActive")
-     * @param val - Value to match for the field
-     * @returns An array of matching UserModel objects
+     * Fetches users that match a set of conditions.
+     *
+     * @param where - Filtering conditions (e.g. `{ role: "ADMIN" }`).
+     * @returns An array of `UserModel` objects that satisfy the conditions, or `null` if an error occurred.
      */
-    async filterBy<K extends keyof Prisma.UserWhereInput>(
-        key: K,
-        val: Prisma.UserWhereInput[K]
-    ): Promise<Array<UserModel | null>> {
-        return await this.prisma.user.findMany({
-            where: { [key]: val } as unknown as Prisma.UserWhereInput
-        });
+    public async filterBy(
+        where: Prisma.UserWhereInput
+    ): Promise<Array<UserModel | null> | null> {
+        try {
+            return await this.prisma.user.findMany({ where });
+        } catch (error) {
+            this._handleError(error);
+            return null;
+        }
     }
 
 };
