@@ -138,4 +138,9 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# generated prisma client!
 /src/generated/prisma
+
+# Ignore local SQLite database
+prisma/*.db
+prisma/*.db-journal

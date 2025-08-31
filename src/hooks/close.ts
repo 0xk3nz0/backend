@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { prisma } from '../utils/prisma.js';
 
 
 
@@ -10,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
  * @param {FastifyInstance} instance - The Fastify server instance.
  */
 export default async (instance: FastifyInstance) => {
+    await prisma.$disconnect();
     instance.log.info('Quitting, ... bye 💨');
     process.exit(0x2e);
 }

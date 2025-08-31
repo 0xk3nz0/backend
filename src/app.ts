@@ -3,15 +3,20 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import LoggingOpts from './utils/logger.js';
 import CloseHandler from './hooks/close.js';
 import SendHandler from './hooks/send.js'
+import { prisma as PrismaClientInstance } from './utils/prisma.js';
+import UserRoutes from './routes/user.js';
 
 
 
 const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
 
-/// ...
+await PrismaClientInstance.$connect();
+fastify.log.info('Prisma connected ✅');
 
 fastify.addHook('onClose', CloseHandler);
 fastify.addHook('onSend', SendHandler);
+
+fastify.register(UserRoutes, { prefix: '/v1/user' });
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
