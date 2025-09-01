@@ -3,8 +3,58 @@ import type { FastifyInstance } from "fastify";
 import DataBaseWrapper from "../utils/prisma.js";
 import type UserModel from "../models/user.js";
 import { Prisma } from "../generated/prisma/index.js";
+import ServiceError from "utils/service-error.js";
 
 
+
+class UserServiceError extends ServiceError {
+
+    constructor () {
+        super();
+        this.setupCodes();
+    }
+
+    setupCodes(): void {
+        this.codes.push(...[
+            {
+                'P2025': {
+                    code: 404,
+                    message: "user record doesn't exist!"
+                }
+            },
+            /// add more codes
+        ]);
+    }
+
+    getErr(code: string): { code: number, message?: string } | undefined {
+        for (const e of this.codes) {
+            if (Object.keys(e)[0] === code) {
+                return e[code];
+            }
+        }
+        return {
+            code: 500,
+            message: `Prisma error code: ${code}`
+        };
+    }
+
+    handleError(
+        fastify: FastifyInstance,
+        service: string,
+        error: Prisma.PrismaClientKnownRequestError | Error
+    ): { code: number, message?: string } | undefined {
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+            const err = this.getErr(error.code);
+            fastify.log.error(`[${service}] deleteBy(key, val) -> ${err}`);
+            return err;
+        } else if (error instanceof Error) {
+            fastify.log.error(`[${service}] deleteBy(key, val) -> ${error.message}`);
+        } else {
+            fastify.log.error(`[${service}] deleteBy(key, val) -> ${error}`);
+        }
+    }
+
+};
 
 /**
  * UserService
@@ -36,17 +86,6 @@ export default class UserService extends DataBaseWrapper {
      * @param error - The error thrown by a Prisma query or runtime issue.
      */
     private _handleError(error: any | unknown): void {
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            if (error.code === "P2025" ) {
-                this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> user record doesn't exist!`);
-            } else {
-                this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> Prisma error code: ${error.code}`);
-            }
-        } else if (error instanceof Error) {
-            this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> ${error.message}`);
-        } else {
-            this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> ${error}`);
-        }
     }
 
     /**
@@ -55,13 +94,12 @@ export default class UserService extends DataBaseWrapper {
      * @param user - User data to insert.
      * @returns `true` if creation succeeded, otherwise `false`.
      */
-    public async create(user: UserModel): Promise<boolean> {
+    public async create(user: UserModel): Promise<boolean | Error> {
         try {
             await this.prisma.user.create({ data: { ...user } });
             return true;
         } catch (error) {
             this._handleError(error);
-            return false;
         }
     }
 
