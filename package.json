@@ -4,6 +4,7 @@
   "description": "backend API for ft_transcendence",
   "main": "src/app.js",
   "scripts": {
+    "start": "tsx --watch src/app.ts",
     "dev": "nodemon",
     "test": "vitest run"
   },
@@ -45,6 +46,8 @@
   },
   "type": "module",
   "dependencies": {
-    "tsx": "^4.20.5"
+    "fastify-type-provider-zod": "^6.0.0",
+    "tsx": "^4.20.5",
+    "zod": "^4.1.5"
   }
 }

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
+import { registrationSchema, type RegisterBody } from "./schemas.js";
 
 
 
@@ -13,6 +14,12 @@ import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyReques
  * @param {FastifyPluginOptions} options - Plugin options passed when registering this route.
  * @returns {Promise<void>} Registers routes asynchronously.
  */
-export default async (fastify: FastifyInstance, options: FastifyPluginOptions) => {
-
+export default async (fastify: FastifyInstance, options: FastifyPluginOptions): Promise<void> => {
+    fastify.post('/register', {
+        schema: {
+            body: registrationSchema
+        }
+    }, async (req: FastifyRequest, rep: FastifyReply) => {
+        rep.code(201).send({ message: '201 Created'});
+    });
 };
