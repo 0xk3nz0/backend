@@ -7,6 +7,8 @@ import ServiceError from "utils/service-error.js";
 
 
 
+export type UserServiceError_t = Error & { code: number, message?: string };
+
 class UserServiceError extends ServiceError {
 
     constructor () {
@@ -20,6 +22,12 @@ class UserServiceError extends ServiceError {
                 'P2025': {
                     code: 404,
                     message: "user record doesn't exist!"
+                }
+            },
+            {
+                'P2002': {
+                    code: 409,
+                    message: "user record already exist!"
                 }
             },
             /// add more codes
@@ -83,12 +91,25 @@ export default class UserService extends DataBaseWrapper {
         this.errorHandler = new UserServiceError();
     }
 
+    throwErr(err: { code: number, message?: string } | undefined) {
+        if (err !== undefined) {
+            const e: UserServiceError_t = Object.assign(new Error(err.message), {
+                code: err.code,
+                message: err.message
+            });
+            throw e;
+        } else {
+            throw Error("Unknown Error Occured!");
+        }
+    }
+
     /**
      * Handles and logs errors that occur during Prisma operations.
      * Differentiates between known Prisma errors (e.g. P2025: record not found),
      * generic JS errors, and unknown error types.
      *
      * @param error - The error thrown by a Prisma query or runtime issue.
+     * @deprecated interact with errorHandler <UserServiceError> instead!
      */
     private _handleError(error: any | unknown): void {
         /// deprecated
@@ -110,9 +131,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return false;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
@@ -137,9 +156,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return false;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
@@ -162,9 +179,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return false;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
@@ -183,9 +198,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return null;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
@@ -207,9 +220,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return null;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
@@ -228,9 +239,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return null;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
@@ -252,9 +261,7 @@ export default class UserService extends DataBaseWrapper {
             if (err === undefined) {
                 return null;
             } else {
-                let e = Error(err.message) as Error & { code?: number };
-                e.code = err.code;
-                throw e;
+                throw this.throwErr(err);
             }
         }
     }
