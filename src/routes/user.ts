@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import type { UserServiceError_t } from "services/user.js";
-import type UserModel from "models/user.js";
+import { userLoginSchema } from "../schemas/user.js";
+import { userLoginController } from "../controllers/user.js";
 
 
 
@@ -15,6 +15,11 @@ import type UserModel from "models/user.js";
  * @param {FastifyPluginOptions} options - Plugin options passed when registering this route.
  * @returns {Promise<void>} Registers routes asynchronously.
  */
-export default async (fastify: FastifyInstance, options: FastifyPluginOptions) => {
+export default async (fastify: FastifyInstance, options: FastifyPluginOptions): Promise<void> => {
+
+    fastify.post('/login', {
+        schema: userLoginSchema,
+        handler: userLoginController
+    });
 
 };
