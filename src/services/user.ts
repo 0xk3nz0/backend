@@ -3,8 +3,58 @@ import type { FastifyInstance } from "fastify";
 import DataBaseWrapper from "../utils/prisma.js";
 import type UserModel from "../models/user.js";
 import { Prisma } from "../generated/prisma/index.js";
+import ServiceError from "utils/service-error.js";
 
 
+
+class UserServiceError extends ServiceError {
+
+    constructor () {
+        super();
+        this.setupCodes();
+    }
+
+    setupCodes(): void {
+        this.codes.push(...[
+            {
+                'P2025': {
+                    code: 404,
+                    message: "user record doesn't exist!"
+                }
+            },
+            /// add more codes
+        ]);
+    }
+
+    getErr(code: string): { code: number, message?: string } | undefined {
+        for (const e of this.codes) {
+            if (Object.keys(e)[0] === code) {
+                return e[code];
+            }
+        }
+        return {
+            code: 500,
+            message: `Prisma error code: ${code}`
+        };
+    }
+
+    handleError(
+        fastify: FastifyInstance,
+        service: string,
+        error: Prisma.PrismaClientKnownRequestError | Error
+    ): { code: number, message?: string } | undefined {
+        if (error instanceof Prisma.PrismaClientKnownRequestError) {
+            const err = this.getErr(error.code);
+            fastify.log.error(`[${service}] deleteBy(key, val) -> ${err}`);
+            return err;
+        } else if (error instanceof Error) {
+            fastify.log.error(`[${service}] deleteBy(key, val) -> ${error.message}`);
+        } else {
+            fastify.log.error(`[${service}] deleteBy(key, val) -> ${error}`);
+        }
+    }
+
+};
 
 /**
  * UserService
@@ -21,11 +71,16 @@ import { Prisma } from "../generated/prisma/index.js";
  * This service extends {@link DataBaseWrapper} to reuse a shared PrismaClient
  * instance and Fastify logger, making it suitable for integration as part of
  * the Fastify service layer (e.g. via decorators or a service container).
+ * 
+ * @note this should be refactored for better error handling!
  */
 export default class UserService extends DataBaseWrapper {
 
+    errorHandler: UserServiceError;
+
     constructor(fastify: FastifyInstance) {
         super('user.service', fastify);
+        this.errorHandler = new UserServiceError();
     }
 
     /**
@@ -36,17 +91,7 @@ export default class UserService extends DataBaseWrapper {
      * @param error - The error thrown by a Prisma query or runtime issue.
      */
     private _handleError(error: any | unknown): void {
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            if (error.code === "P2025" ) {
-                this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> user record doesn't exist!`);
-            } else {
-                this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> Prisma error code: ${error.code}`);
-            }
-        } else if (error instanceof Error) {
-            this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> ${error.message}`);
-        } else {
-            this.fastify.log.error(`[${this.service}] deleteBy(key, val) -> ${error}`);
-        }
+        /// deprecated
     }
 
     /**
@@ -59,9 +104,16 @@ export default class UserService extends DataBaseWrapper {
         try {
             await this.prisma.user.create({ data: { ...user } });
             return true;
-        } catch (error) {
-            this._handleError(error);
-            return false;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return false;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 
@@ -79,9 +131,16 @@ export default class UserService extends DataBaseWrapper {
         try {
             await this.prisma.user.update({ where, data });
             return true;
-        } catch (error) {
-            this._handleError(error);
-            return false;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return false;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 
@@ -97,9 +156,16 @@ export default class UserService extends DataBaseWrapper {
         try {
             await this.prisma.user.delete({ where });
             return true;
-        } catch (error) {
-            this._handleError(error);
-            return false;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return false;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 
@@ -111,9 +177,16 @@ export default class UserService extends DataBaseWrapper {
     public async deleteAll(): Promise<number | null> {
         try {
             return (await this.prisma.user.deleteMany()).count;
-        } catch (error) {
-            this._handleError(error);
-            return null;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return null;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 
@@ -128,9 +201,16 @@ export default class UserService extends DataBaseWrapper {
     ): Promise<UserModel | null> {
         try {
             return await this.prisma.user.findUnique({ where });
-        } catch (error) {
-            this._handleError(error);
-            return null;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return null;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 
@@ -142,9 +222,16 @@ export default class UserService extends DataBaseWrapper {
     public async fetchAll(): Promise<Array<UserModel | null> | null> {
         try {
             return await this.prisma.user.findMany();
-        } catch (error) {
-            this._handleError(error);
-            return null;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return null;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 
@@ -159,9 +246,16 @@ export default class UserService extends DataBaseWrapper {
     ): Promise<Array<UserModel | null> | null> {
         try {
             return await this.prisma.user.findMany({ where });
-        } catch (error) {
-            this._handleError(error);
-            return null;
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error);
+            if (err === undefined) {
+                return null;
+            } else {
+                let e = Error(err.message) as Error & { code?: number };
+                e.code = err.code;
+                throw e;
+            }
         }
     }
 

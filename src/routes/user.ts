@@ -4,6 +4,8 @@ import { prisma } from "utils/prisma.js";
 import bcrypt from "bcrypt";
 import { email } from "zod";
 import { required } from "zod/mini";
+import type UserModel from "models/user.js";
+
 
 // import service from "plugins/service.js";
 // import type UserModel from "models/user.js";
@@ -26,7 +28,6 @@ function handler() {
  * @returns {Promise<void>} Registers routes asynchronously.
  */
 export default async (fastify: FastifyInstance, options: FastifyPluginOptions): Promise<void> => {
-
 
     // Get all users
     fastify.get('/', async (request, reply) => {
@@ -214,5 +215,15 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
             token
         });
     });
+
+
+    fastify.post('/zido', async (req: FastifyRequest<{ Body: { name: string, email: string, password: string } }>, rep: FastifyReply) => {
+        await fastify.service.user.create({
+            name: req.body.name,
+            email: req.body.email,
+            password: req.body.password
+        });
+    });
+
 };
 
