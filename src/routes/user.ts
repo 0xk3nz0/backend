@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
+import type UserModel from "models/user.js";
 
 
 
@@ -14,5 +15,13 @@ import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyReques
  * @returns {Promise<void>} Registers routes asynchronously.
  */
 export default async (fastify: FastifyInstance, options: FastifyPluginOptions) => {
+
+    fastify.post('/zido', async (req: FastifyRequest<{ Body: { name: string, email: string, password: string } }>, rep: FastifyReply) => {
+        await fastify.service.user.create({
+            name: req.body.name,
+            email: req.body.email,
+            password: req.body.password
+        });
+    });
 
 };
