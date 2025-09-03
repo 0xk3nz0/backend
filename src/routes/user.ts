@@ -1,6 +1,9 @@
 import { userRegisterController } from "controllers/user.js";
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 import { userRegisterSchema } from "schemas/user.js";
+import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
+import { userLoginSchema } from "../schemas/user.js";
+import { userLoginController } from "../controllers/user.js";
 
 
 
@@ -21,6 +24,11 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     fastify.post('/register', {
         schema: userRegisterSchema,
         handler: userRegisterController
+    });
+
+    fastify.post('/login', {
+        schema: userLoginSchema,
+        handler: userLoginController
     });
 
 };
