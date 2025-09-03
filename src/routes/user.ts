@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { userRegisterSchema } from "../validation/schema.js";
+import { userRegisterSchema } from "../schemas/user.js";
+import type { UserServiceError_t } from "services/user.js";
 import type UserModel from "models/user.js";
 import { prisma } from "utils/prisma.js";
 import bcrypt from "bcrypt";
@@ -176,14 +177,6 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
         });
     });
 
-
-    fastify.post('/zido', async (req: FastifyRequest<{ Body: { name: string, email: string, password: string } }>, rep: FastifyReply) => {
-        await fastify.service.user.create({
-            name: req.body.name,
-            email: req.body.email,
-            password: req.body.password
-        });
-    });
 
 };
 
