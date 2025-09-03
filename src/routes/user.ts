@@ -1,19 +1,14 @@
+import { userRegisterController } from "controllers/user.js";
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { userRegisterSchema } from "../schemas/user.js";
-import type { UserServiceError_t } from "services/user.js";
-import type UserModel from "models/user.js";
+import { userRegisterSchema } from "schemas/user.js";
 import { prisma } from "utils/prisma.js";
 import bcrypt from "bcrypt";
+
 
 
 // import service from "plugins/service.js";
 // import type UserModel from "models/user.js";
 // import fastify from "fastify";
-
-function handler() {
-    return ;
-}
-
 
 /**
  * Fastify plugin for user-related routes.
@@ -59,51 +54,16 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
         });
     });
 
-
     // Register a new user
     fastify.post('/register', {
-        // preHandler: handler,
-        schema: userRegisterSchema
-    }, async (request: FastifyRequest<{ Body: {name: string, email: string, password: string} }>, reply: FastifyReply) => {
-
-        const { name, email, password } = request.body; // as { email: string, password: string};
-
-        // 1. Check if user exists
-        const isUserExist = await prisma.user.findUnique({ 
-            where: { email }
-            // where: { OR: [{ email }, { name }] },
-        });
-
-        if (isUserExist) {
-            return reply.code(400).send({ error: "Email or username already exists" });
-        }
-
-        // 2. Hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // 3. Create user
-        // fastify.service.user.create({ name, email, password } as UserModel);
-        const user = await prisma.user.create({
-            data: {
-                name,
-                email,
-                password: hashedPassword,
-            }
-        });
-
-        // 4. Generate JWT
-        const token = fastify.jwt.sign({ id: user.id, email: user.email });
-
-        reply.code(201).send({
-            message: '201 Created',
-            user: {
-                id: user.id,
-                username: name,
-                createdAt: user.createdAt
-            },
-            token
-        });
+        schema: userRegisterSchema,
+        handler: userRegisterController
     });
+
+    // fastify.post('/register', {
+    //     // preHandler: handler,
+    //     schema: userRegisterSchema
+    // }, );
 
 
     // Login an existing user
