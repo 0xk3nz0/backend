@@ -1,10 +1,8 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { registrationSchema, type RegisterBody } from "../validation/schema.js";
+import { userRegisterSchema } from "../validation/schema.js";
+import type UserModel from "models/user.js";
 import { prisma } from "utils/prisma.js";
 import bcrypt from "bcrypt";
-import { email } from "zod";
-import { required } from "zod/mini";
-import type UserModel from "models/user.js";
 
 
 // import service from "plugins/service.js";
@@ -64,45 +62,7 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     // Register a new user
     fastify.post('/register', {
         // preHandler: handler,
-        schema: {
-            body: {
-                type: 'object',
-                required: ['name', 'email', 'password'],
-                properties: {
-                    name: {
-                        type: 'string',
-                        minLength: 3
-                    },
-                    email: {
-                        type: 'string',
-                        format: 'email'
-                    },
-                    password: {
-                        type: 'string',
-                        minLength: 8,
-                        // pattern: '^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$'
-                        // ✅ at least 8 chars, one letter, one number
-                    }
-                }
-            },
-            response: {
-                201: {
-                    type: 'object',
-                    properties: {
-                        message: { type: 'string' },
-                        user: {
-                            type: 'object',
-                            properties: {
-                                id: { type: 'string' },
-                                username: { type: 'string' },
-                                createdAt: { type: 'string' }
-                            }
-                        },
-                        token: { type: 'string' }
-                    }
-                }
-            }
-        }
+        schema: userRegisterSchema
     }, async (request: FastifyRequest<{ Body: {name: string, email: string, password: string} }>, reply: FastifyReply) => {
 
         const { name, email, password } = request.body; // as { email: string, password: string};

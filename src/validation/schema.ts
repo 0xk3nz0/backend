@@ -1,12 +1,53 @@
-import { z } from 'zod';
+export const userRegisterSchema = {
+    body: {
+        type: 'object',
+        required: ['name', 'email', 'password'],
+        properties: {
+            name: {
+                type: 'string',
+                minLength: 3
+            },
+            email: {
+                type: 'string',
+                format: 'email'
+            },
+            password: {
+                type: 'string',
+                minLength: 8,
+                // pattern: '^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$'
+                // ✅ at least 8 chars, one letter, one number
+            }
+        }
+    },
+    response: {
+        201: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' },
+                user: {
+                    type: 'object',
+                    properties: {
+                        id: { type: 'string' },
+                        username: { type: 'string' },
+                        createdAt: { type: 'string' }
+                    }
+                },
+                token: { type: 'string' }
+            }
+        }
+    }
+}
 
-export const registrationSchema = z.object({
-    username: z.string().min(3),
-    email: z.string().email(),
-    password: z.string().min(8)
-})
 
-export type RegisterBody = z.infer<typeof registrationSchema>;
+// import { z } from 'zod';
+
+// export const registrationSchema = z.object({
+//     username: z.string().min(3),
+//     email: z.string().email(),
+//     password: z.string().min(8)
+// })
+
+// export type RegisterBody = z.infer<typeof registrationSchema>;
 
 // import fastify from "fastify";
 
@@ -93,3 +134,4 @@ export type RegisterBody = z.infer<typeof registrationSchema>;
 // }
 
 // start()
+
