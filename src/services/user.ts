@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import DataBaseWrapper from "../utils/prisma.js";
 import type UserModel from "../models/user.js";
-import { Prisma } from "../generated/prisma/index.js";
+import { Prisma, type User } from "../generated/prisma/index.js";
 import ServiceError from "utils/service-error.js";
 
 
@@ -121,15 +121,14 @@ export default class UserService extends DataBaseWrapper {
      * @param user - User data to insert.
      * @returns `true` if creation succeeded, otherwise `false`.
      */
-    public async create(user: UserModel): Promise<boolean> {
+    public async create(user: UserModel): Promise<UserModel | Error> {
         try {
-            await this.prisma.user.create({ data: { ...user } });
-            return true;
+            return await this.prisma.user.create({ data: { ...user } });;
         } catch (error: any) {
             let err = this.errorHandler.handleError(
                 this.fastify, this.service, error);
             if (err === undefined) {
-                return false;
+                throw Error("unknown error!");
             } else {
                 throw this.throwErr(err);
             }
