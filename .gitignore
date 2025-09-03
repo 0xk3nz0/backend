@@ -144,3 +144,5 @@ vite.config.ts.timestamp-*
 # Ignore local SQLite database
 prisma/*.db
 prisma/*.db-journal
+
+.idea
