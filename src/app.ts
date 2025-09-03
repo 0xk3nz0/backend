@@ -6,7 +6,7 @@ import SendHandler from './hooks/send.js'
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import UserRoutes from './routes/user.js';
 import ServiceManagerPlugin from './plugins/service.js';
-
+import jwt from '@fastify/jwt';
 
 
 const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
@@ -20,6 +20,7 @@ fastify.addHook('onSend', SendHandler);
 fastify.register(ServiceManagerPlugin);
 
 fastify.register(UserRoutes, { prefix: '/v1/user' });
+fastify.register(jwt, { secret: "supersecret" });
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
