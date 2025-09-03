@@ -11,8 +11,8 @@ POST http://localhost:3000/v1/user/register HTTP/1.1
 Content-Type: application/json
 
 {
-    "name": "zizo",
-    "email": "ziz@zizo.com",
+    "name": "azizo",
+    "email": "ziz@azizo.com",
     "password": "123asfas"
 }
 
