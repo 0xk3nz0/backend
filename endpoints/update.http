@@ -1,0 +1,8 @@
+PUT http://localhost:3000/v1/user/update HTTP/1.1
+Content-Type: application/json
+
+{
+  "id": "1493d9b3-e22b-49c6-a067-d874245ddbe2",
+  "field": "avatar",
+  "value": "../../../etc/passwd.:p"
+}

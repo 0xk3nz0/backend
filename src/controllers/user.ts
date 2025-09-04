@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyReques
 import { prisma } from "utils/prisma.js";
 import bcrypt from "bcrypt";
 import type UserModel from "../models/user.js";
+import type { Prisma } from "generated/prisma/index.js";
 
 
 
@@ -46,10 +47,7 @@ export const userRegisterController = async (request: FastifyRequest<{ Body: {na
     });
 }
 
-export const userLoginController = async (
-    req: FastifyRequest<{ Body: { email: string, password: string } }>,
-    rep: FastifyReply
-) => {
+export const userLoginController = async (req: FastifyRequest<{ Body: { email: string, password: string } }>, rep: FastifyReply) => {
     const fastify: FastifyInstance = req.server;
     const user: UserModel | null = await fastify.service.user.fetchBy({ 'email': req.body.email });
     if (user === null) {
@@ -70,4 +68,40 @@ export const userLoginController = async (
             })
         }
     }
+};
+
+export const userProfileUpdateController = async (req: FastifyRequest<{ Body: { id: string, field: string, value: string } }>, rep: FastifyReply) => {
+    /// i will assume that the user will be able to access the profile settings
+    /// right there he can update those things, ...
+    ///     - name
+    ///     - avatar
+    /// ...
+    
+    let update_data = {};
+    switch (req.body.field) {
+        
+        case "name": {
+            update_data = { name: req.body.value };
+            break;
+        }
+        
+        case "avatar": {
+            update_data = { avatar: req.body.value };
+            break;
+        }
+
+        /// you can add other things to change, for now ill stick with username & email.
+
+        default: {
+            throw Error("user attrib doesn't exist!");
+        }
+    
+    };
+
+    await req.server.service.user.updateBy({ id: req.body.id }, update_data);
+    rep.code(200).send({
+        uid: req.body.id,
+        [Object.keys(update_data)[0] as string]: Object.values(update_data)[0],
+        message: 'success!'
+    });
 };
