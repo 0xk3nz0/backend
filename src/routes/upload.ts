@@ -1,11 +1,9 @@
-// import fs from "fs";
-// import path from "path";
-// import multipart from "fastify-multipart";
-// import { fastify } from "../app.js"
-// import type { FastifyReply, FastifyRequest } from "fastify";
+import fs from "fs";
+import path from "path";
+import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
 
-// fastify.register(multipart);
-
-// fastify.post('/post', async (request: FastifyRequest, reply: FastifyReply) => {
-//     // 
-// });
+export default async (fastify: FastifyInstance, options: FastifyPluginOptions) => {
+    fastify.post('/post', async (request: FastifyRequest, reply: FastifyReply) => {
+        // request.file();
+    });
+}

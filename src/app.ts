@@ -7,6 +7,9 @@ import SendHandler from './hooks/send.js';
 import UserRoutes from './routes/user.js';
 import jwt from '@fastify/jwt';
 import dotenv from "dotenv";
+import multipart from "@fastify/multipart";
+
+
 
 dotenv.config();
 const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
@@ -26,6 +29,7 @@ fastify.register(ServiceManagerPlugin);
 
 fastify.register(UserRoutes, { prefix: '/v1/user' });
 fastify.register(jwt, { secret: process.env.JWT || "supersecret" });
+fastify.register(multipart);
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
