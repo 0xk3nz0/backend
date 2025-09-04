@@ -41,9 +41,16 @@ export const userRegisterSchema = {
 export const userLoginSchema = {
     body: {
         type: 'object',
+        required: ['email', 'password'],
         properties: {
-            email: { type: 'string' },
-            password: { type: 'string' },
+            email: {
+                type: 'string',
+                format: 'email'
+            },
+            password: {
+                type: 'string',
+                minLength: 8
+            },
         }
     },
     response: {
@@ -67,6 +74,34 @@ export const userLoginSchema = {
                 statusCode: { type: 'number' },
                 message: { type: 'string' }
             }
+        }
+    }
+};
+
+export const userProfileUpdateSchema = {
+    body: {
+        type: 'object',
+        properties: {
+            id: { type: 'string' },
+            field: {
+                type: 'string',
+                enum: [
+                    'name',
+                    'avatar'
+                ]
+            },
+            value: { type: 'string' }
+        }
+    },
+    response: {
+        200: {
+            type: 'object',
+            properties: {
+                uid: { type: 'string' },
+                message: { type: 'string' }
+            },
+            required: [ 'uid', 'message' ],
+            additionalProperties: true
         }
     }
 };

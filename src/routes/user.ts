@@ -1,14 +1,8 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { userRegisterSchema, userLoginSchema } from "schemas/user.js";
-import { userRegisterController, userLoginController } from "controllers/user.js";
-import { prisma } from "utils/prisma.js";
-import bcrypt from "bcrypt";
+import { userRegisterSchema, userLoginSchema, userProfileUpdateSchema } from "schemas/user.js";
+import { userRegisterController, userLoginController, userProfileUpdateController } from "controllers/user.js";
 
 
-
-// import service from "plugins/service.js";
-// import type UserModel from "models/user.js";
-// import fastify from "fastify";
 
 /**
  * Fastify plugin for user-related routes.
@@ -31,6 +25,11 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     fastify.post('/login', {
         schema: userLoginSchema,
         handler: userLoginController
+    });
+
+    fastify.put('/update', {
+        schema: userProfileUpdateSchema,
+        handler: userProfileUpdateController
     });
 
 };
