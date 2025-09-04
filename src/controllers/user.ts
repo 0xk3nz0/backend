@@ -9,15 +9,20 @@ import type { UserServiceError_t } from "services/user.js";
  * @param reply 
  * @returns 
  */
-export const userRegisterController = async (request: FastifyRequest<{ Body: {name: string, email: string, password: string} }>, reply: FastifyReply) => {
+export const userRegisterController = async (
+    request: FastifyRequest<{ Body: {name: string, email: string, password: string} }>,
+    reply: FastifyReply) => {
 
     try {
-        const user: UserModel | null = await request.server.service.user.create({
+        const fastify: FastifyInstance = request.server;
+        const user: UserModel | null = await fastify.service.user.create({
             name: request.body.name,
             email: request.body.email,
             password: request.body.password
         });
-        if (user !== null) {
+        if (!user) {
+            reply.code(500).send({ message: 'Internal server error' });
+        } else {
             reply.code(201).send({
                 message: 'user created!',
                 user: {
@@ -26,8 +31,6 @@ export const userRegisterController = async (request: FastifyRequest<{ Body: {na
                     createdAt: user.createdAt
                 }
             });
-        } else {
-            reply.code(500).send({ message: 'Tir Bzkok!' });
         }
     } catch (e: UserServiceError_t | unknown) {
         reply.code((e as UserServiceError_t).code).send({
@@ -37,15 +40,6 @@ export const userRegisterController = async (request: FastifyRequest<{ Body: {na
     }
     
 }
-
-import type {
-    FastifyInstance,
-    FastifyReply,
-    FastifyRequest
-} from "fastify";
-import type UserModel from "../models/user.js";
-
-
 
 export const userLoginController = async (
     req: FastifyRequest<{ Body: { email: string, password: string } }>,

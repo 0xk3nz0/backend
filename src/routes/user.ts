@@ -1,9 +1,9 @@
-import { userRegisterController } from "controllers/user.js";
-import type { FastifyInstance, FastifyPluginOptions } from "fastify";
-import { userRegisterSchema } from "schemas/user.js";
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { userLoginSchema } from "../schemas/user.js";
-import { userLoginController } from "../controllers/user.js";
+import  { userRegisterController } from "controllers/user.js";
+import  { userRegisterSchema } from "schemas/user.js";
+import  { userLoginSchema } from "../schemas/user.js";
+import  { userLoginController } from "../controllers/user.js";
+import  { prisma } from "utils/prisma.js";
 
 
 
@@ -29,6 +29,47 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     fastify.post('/login', {
         schema: userLoginSchema,
         handler: userLoginController
+    });
+
+    // ============= LHAJ PLEASE IGNORE THIS FOR NOW ============= //
+
+    // Get all users
+    fastify.get('/', async (request, reply) => {
+        const users = await prisma.user.findMany();
+        return reply.send(users);
+    });
+
+    // Get one user by it's id
+    fastify.get('/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const { id } = request.params;
+        const user = await prisma.user.findUnique({
+            where: { id }
+        });
+        return reply.send(user);
+    });
+
+    // delete a user by its name
+    fastify.delete('/:id', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+        const { id } = request.params;
+        try {
+            const user = await prisma.user.delete({
+                where: { id }
+            });
+
+            return reply.send({ message: "User deleted", user });
+        } catch(error) {
+            fastify.log.error("");
+        }
+    });
+
+
+    // Delete all users
+    fastify.delete('/', async (request: FastifyRequest, reply: FastifyReply) => {
+        const result = await prisma.user.deleteMany({});
+        reply.send({
+            message: "Ina lilah database mchat",
+            result
+        });
     });
 
 };

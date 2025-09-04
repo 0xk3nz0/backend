@@ -1,8 +1,11 @@
 ### Get all
 GET http://localhost:3000/v1/user/ HTTP/1.1
 
-### Delete all
+### Get one user
+GET http://localhost:3000/v1/user/68aebee3-8c70-4675-9e9b-1cf2b5bd05ea HTTP/1.1
 
+
+### Delete all
 DELETE  http://localhost:3000/v1/user/ HTTP/1.1
 
 
@@ -17,11 +20,21 @@ Content-Type: application/json
 }
 
 ###
+POST http://localhost:3000/v1/user/register HTTP/1.1
+Content-Type: application/json
+
+{
+    "name": "lhaj-zwizo",
+    "email": "abyss-prushka@ozen.co.orp.cn",
+    "password": "prushka123@"
+}
+
+###
 POST http://localhost:3000/v1/user/login HTTP/1.1
 Content-Type: application/json
 
 {
-    "name": "zizo",
-    "email": "ziz@zizo.com",
-    "password": "123asfas"
+    "name": "lhaj-zwizo",
+    "email": "abyss-prushka@ozen.co.orp.cn",
+    "password": "prushka123@"
 }

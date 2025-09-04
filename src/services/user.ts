@@ -121,7 +121,7 @@ export default class UserService extends DataBaseWrapper {
      * @param user - User data to insert.
      * @returns `true` if creation succeeded, otherwise `false`.
      */
-    public async create(user: UserModel): Promise<UserModel | Error> {
+    public async create(user: UserModel): Promise<UserModel | null> {
         try {
             return await this.prisma.user.create({ data: { ...user } });;
         } catch (error: any) {
