@@ -21,6 +21,7 @@ model User {
   password  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  avatar    String   @default("../public/images/default-avatar.jpg")
 
   @@index([name, email])
 }
