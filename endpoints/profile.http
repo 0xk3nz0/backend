@@ -1,0 +1,11 @@
+### get profile
+GET http://localhost:3000/v1/user/profile HTTP/1.1
+
+### update profile
+PUT http://localhost:3000/v1/user/profile HTTP/1.1
+Content-Type: application/json
+
+{
+  "field": "avatar",
+  "value": "../public/images/default-avatar.jpg"
+}
