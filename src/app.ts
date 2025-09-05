@@ -1,12 +1,23 @@
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import { configDotenv } from "dotenv";
+configDotenv();
+
+import Fastify, { type FastifyInstance } from 'fastify';
+import jwt from '@fastify/jwt';
+import fcookie from '@fastify/cookie';
 
 import LoggingOpts from './utils/logger.js';
+
 import CloseHandler from './hooks/close.js';
 import SendHandler from './hooks/send.js'
+import PreHandler from './hooks/pre.js'
+
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
+
 import UserRoutes from './routes/user.js';
+
 import ServiceManagerPlugin from './plugins/service.js';
-import jwt from '@fastify/jwt';
+import JWTAuthenticationPlugin from './plugins/jwt.js';
+
 
 
 const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
@@ -16,11 +27,19 @@ fastify.log.info('Prisma connected ✅');
 
 fastify.addHook('onClose', CloseHandler);
 fastify.addHook('onSend', SendHandler);
+fastify.addHook('preHandler', PreHandler);
 
+fastify.register(jwt, {
+    secret: process.env.JWT_SECRET || "supersecret"
+});
+fastify.register(fcookie, {
+    secret: process.env.CKE_SECRET || "supersecret",
+    hook: 'preHandler'
+});
 fastify.register(ServiceManagerPlugin);
+fastify.register(JWTAuthenticationPlugin);
 
 fastify.register(UserRoutes, { prefix: '/v1/user' });
-fastify.register(jwt, { secret: "supersecret" });
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
