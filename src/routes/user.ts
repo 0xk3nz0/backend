@@ -24,7 +24,7 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
 
     fastify.post('/avatar', {
         // schema: userRegisterSchema,
-        preHandler: [fastify.authentication_jwt],
+        // preHandler: [fastify.authentication_jwt],
         handler: userUploadHandler
     });
 
