@@ -14,6 +14,7 @@ import SendHandler from './hooks/send.js'
 import PreHandler from './hooks/pre.js'
 
 import UserRoutes from './routes/user.js';
+import TestRoutes from './routes/test.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
@@ -46,6 +47,8 @@ fastify.register(ServiceManagerPlugin);
 fastify.register(JWTAuthenticationPlugin);
 
 fastify.register(UserRoutes, { prefix: '/v1/user' });
+fastify.register(TestRoutes, { prefix: '/v1/user' });
+
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
