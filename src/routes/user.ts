@@ -23,8 +23,7 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     });
 
     fastify.post('/avatar', {
-        // schema: userRegisterSchema,
-        // preHandler: [fastify.authentication_jwt],
+        preHandler: [fastify.authentication_jwt],
         handler: userUploadHandler
     });
 
@@ -34,7 +33,7 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     });
 
     fastify.get('/profile', {
-        schema: {},
+        schema: userProfileSchema,
         handler: userProfileController,
         preHandler: [fastify.authentication_jwt]
     });
