@@ -22,7 +22,23 @@ export const userRegisterSchema = {
                 type: 'string',
                 minLength: 8,
                 maxLength: 30,
-                pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[@$!%*?&])[A-Za-z\\d@$!%*?&]'
+                /*
+                What this enforces:
+                    (?=.*[a-z]) → at least 1 lowercase letter
+                    (?=.*[A-Z]) → at least 1 uppercase letter
+                    (?=.*\d) → at least 1 digit
+                    (?=.*[@$!%*?&]) → at least 1 special character from @$!%*?&
+                    [A-Za-z\d@$!%*?&]{8,} → only allowed characters, and at least 8 characters long
+                    ^...$ → anchors to match the entire string
+                Example matches ✅
+                    Abcd1234! → ✅
+                    StrongPass1@ → ✅
+                    Test123$ → ✅
+                Example failures ❌
+                    abcdefg → ❌ (no uppercase, digit, or special char)
+                    ABCDEFG1! → ❌ (no lowercase)
+                    Abc!1 → ❌ (too short)*/
+                pattern: "^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$",
             },
             // age: {
             //     type: 'integer',

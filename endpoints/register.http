@@ -16,7 +16,7 @@ Content-Type: application/json
 {
     "name": "azizo",
     "email": "ziz@azizo.com",
-    "password": "123asfas"
+    "password": "Aziz123456$"
 }
 
 ###
@@ -24,9 +24,9 @@ POST http://localhost:3000/v1/user/register HTTP/1.1
 Content-Type: application/json
 
 {
-    "name": "lhaj-zwizo",
+    "name": "lhajzwizo",
     "email": "abyss-prushka@ozen.co.orp.cn",
-    "password": "prushka123@"
+    "password": "Prushka123%$"
 }
 
 ###
