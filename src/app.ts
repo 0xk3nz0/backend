@@ -61,6 +61,7 @@ fastify.register(TestRoutes, { prefix: '/v1/user' });
 (async () => {
     try {
         await fastify.listen({
+            host: '0.0.0.0',
             port: 3000
         });
     } catch (error) {

@@ -26,6 +26,11 @@ RUN npm install
 
 COPY . .
 
+RUN npx prisma migrate dev --name init
+RUN npx prisma generate
+
 EXPOSE 3000
 
-CMD [ "npm", "run", "dev" ]
+CMD ["npm", "start"]
+# CMD ["sh", "-c", "npx prisma migrate dev && npm start"]
+# CMD [ "npx", "prisma", "migrate", "dev", "&&", "npm", "start" ]
