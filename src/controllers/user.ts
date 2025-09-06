@@ -1,10 +1,55 @@
-import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { prisma } from "utils/prisma.js";
+import fs from "fs";
+import path from "path";
 import bcrypt from "bcrypt";
+import { prisma } from "utils/prisma.js";
 import type UserModel from "../models/user.js";
-import type { Prisma } from "generated/prisma/index.js";
+import { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 
 
+
+const UPLOAD_DIR = "/home/kali/Desktop/PFE/backend/public/images";
+
+export const userUplaodHandler = async (request: FastifyRequest<{ Body: { description: string } }>, reply: FastifyReply) => {
+
+    const data = await request.file();
+    if (!data) {
+        return reply.code(400).send({ error: "No file uploaded" });
+    }
+
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+
+    request.log.debug(`filename: ${data.filename}`);
+    request.log.debug(`mimetype: ${data.mimetype}`);
+
+    if (!["image/png", "image/jpeg"].includes(data.mimetype)) {
+      return reply.code(400).send({ error: "Invalid file type" });
+    }
+
+    const timestamp = Date.now();
+    const ext = path.extname(data.filename);
+    const safeName = path.basename(data.filename, ext).replace(/\s+/g, "_");
+    const filename = `${timestamp}_${safeName}${ext}`;
+    const uploadPath = path.join(UPLOAD_DIR, filename);
+    request.log.debug(uploadPath);
+
+    try 
+    {
+        await new Promise<void>((resolve, reject) => {
+            const writeStream = fs.createWriteStream(uploadPath);
+            data.file.pipe(writeStream);
+            data.file.on("end", resolve);
+            data.file.on("error", reject);
+        });
+    } catch(e) {
+        request.log.error("something happened!");
+    }
+
+    return {
+        success: true,
+        filename: data.filename,
+    };
+}
 
 export const userRegisterController = async (request: FastifyRequest<{ Body: {name: string, email: string, password: string} }>, reply: FastifyReply) => {
 
