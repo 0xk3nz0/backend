@@ -36,17 +36,16 @@ fastify.register(fcookie, {
     secret: process.env.CKE_SECRET || "supersecret",
     hook: 'preHandler'
 });
-
-fastify.register(ServiceManagerPlugin);
-fastify.register(JWTAuthenticationPlugin);
-
-fastify.register(UserRoutes, { prefix: '/v1/user' });
-
 fastify.register(multipart, {
     limits: {
         fileSize: 10 * 1024 * 1024 // 10 MB
     }
 });
+
+fastify.register(ServiceManagerPlugin);
+fastify.register(JWTAuthenticationPlugin);
+
+fastify.register(UserRoutes, { prefix: '/v1/user' });
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
