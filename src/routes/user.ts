@@ -1,4 +1,4 @@
-import { userRegisterController, userUplaodHandler, userLoginController, userProfileUpdateController } from "controllers/user.js";
+import { userRegisterController, userUploadHandler, userLoginController, userProfileUpdateController, userProfileController } from "../controllers/user.js";
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
 import { userRegisterSchema, userLoginSchema, userProfileUpdateSchema } from "schemas/user.js";
 
@@ -24,8 +24,8 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
 
     fastify.post('/avatar', {
         // schema: userRegisterSchema,
-        preHandler: [fastify.authenticate],
-        handler: userUplaodHandler
+        preHandler: [fastify.authentication_jwt],
+        handler: userUploadHandler
     });
 
     fastify.post('/login', {
@@ -33,9 +33,16 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
         handler: userLoginController
     });
 
-    fastify.put('/update', {
+    fastify.get('/profile', {
+        schema: {},
+        handler: userProfileController,
+        preHandler: [fastify.authentication_jwt]
+    });
+
+    fastify.put('/profile', {
         schema: userProfileUpdateSchema,
-        handler: userProfileUpdateController
+        handler: userProfileUpdateController,
+        preHandler: [fastify.authentication_jwt]
     });
 
 };

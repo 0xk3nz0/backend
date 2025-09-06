@@ -4,12 +4,13 @@ import bcrypt from "bcrypt";
 import { prisma } from "utils/prisma.js";
 import type UserModel from "../models/user.js";
 import { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import type { UserRegisterInput, UserLoginInput, UserUpdateInput } from "../models/user.js";
 
 
 
 const UPLOAD_DIR = "/home/kali/Desktop/PFE/backend/public/images";
 
-export const userUplaodHandler = async (request: FastifyRequest<{ Body: { description: string } }>, reply: FastifyReply) => {
+export const userUploadHandler = async (request: FastifyRequest<{ Body: { description: string } }>, reply: FastifyReply) => {
 
     const data = await request.file();
     if (!data) {
@@ -51,7 +52,9 @@ export const userUplaodHandler = async (request: FastifyRequest<{ Body: { descri
     };
 }
 
-export const userRegisterController = async (request: FastifyRequest<{ Body: {name: string, email: string, password: string} }>, reply: FastifyReply) => {
+export const userRegisterController = async (
+    request: FastifyRequest<{ Body: UserRegisterInput }>, reply: FastifyReply
+): Promise<void> => {
 
     const { name, email, password } = request.body; // as { email: string, password: string};
 
@@ -79,7 +82,14 @@ export const userRegisterController = async (request: FastifyRequest<{ Body: {na
     });
 
     // 4. Generate JWT
-    const token = request.server.jwt.sign({ id: user.id, email: user.email });
+    /**
+     * @warning you don't need to generate anything here
+     *          since all you do is registering the user
+     *          adding it into the database doesn't need
+     *          a JWT token !
+     * @note    it will be needed when logging in !
+     */
+    // const token = request.server.jwt.sign({ id: user.id, email: user.email });
 
     reply.code(201).send({
         message: '201 Created',
@@ -87,24 +97,43 @@ export const userRegisterController = async (request: FastifyRequest<{ Body: {na
             id: user.id,
             username: name,
             createdAt: user.createdAt
-        },
-        token
+        }
     });
 }
 
-export const userLoginController = async (req: FastifyRequest<{ Body: { email: string, password: string } }>, rep: FastifyReply) => {
+export const userLoginController = async (
+    req: FastifyRequest<{ Body: UserLoginInput }>, rep: FastifyReply
+): Promise<void> => {
     const fastify: FastifyInstance = req.server;
     const user: UserModel | null = await fastify.service.user.fetchBy({ 'email': req.body.email });
+
     if (user === null) {
         rep.code(404).send({
             statusCode: 404,
             message: 'not found!'
         });
     } else {
-        if (user.password === req.body.password) {
-            rep.code(200).send({
+        fastify.log.info(user);
+            fastify.log.info(`comparing ${req.body.password} with ${user.password}`);
+        const isValid = await bcrypt.compare(req.body.password, user.password || "");
+        fastify.log.info(isValid);
+        if (isValid) {
+            const payload = {
                 uid: user.id,
-                message: 'success!'
+                name: user.name,
+                createdAt: user.createdAt
+            };
+
+            const token = req.jwt.sign(payload);
+
+            rep.setCookie('access_token', token, {
+                path: '/',
+                httpOnly: true,
+                secure: true,
+            });
+
+            rep.code(200).send({
+                access_token: token
             });
         } else {
             rep.code(401).send({
@@ -113,9 +142,21 @@ export const userLoginController = async (req: FastifyRequest<{ Body: { email: s
             })
         }
     }
-};
+}
 
-export const userProfileUpdateController = async (req: FastifyRequest<{ Body: { id: string, field: string, value: string } }>, rep: FastifyReply) => {
+export const userProfileController = async (
+    req: FastifyRequest, rep: FastifyReply
+): Promise<void> => {
+    rep.code(200).send({
+        uid: req.user.uid,
+        name: req.user.name,
+        createdAt: req.user.createdAt
+    });
+}
+
+export const userProfileUpdateController = async (
+    req: FastifyRequest<{ Body: UserUpdateInput }>, rep: FastifyReply
+): Promise<void> => {
     /// i will assume that the user will be able to access the profile settings
     /// right there he can update those things, ...
     ///     - name
@@ -143,10 +184,8 @@ export const userProfileUpdateController = async (req: FastifyRequest<{ Body: { 
     
     };
 
-    await req.server.service.user.updateBy({ id: req.body.id }, update_data);
+    await req.server.service.user.updateBy({ id: req.user.uid }, update_data);
     rep.code(200).send({
-        uid: req.body.id,
-        [Object.keys(update_data)[0] as string]: Object.values(update_data)[0],
         message: 'success!'
     });
-};
+}
