@@ -3,12 +3,12 @@ import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import ServiceManagerPlugin from './plugins/service.js';
 import CloseHandler from './hooks/close.js';
 import LoggingOpts from './utils/logger.js';
+import multipart from "@fastify/multipart";
 import SendHandler from './hooks/send.js';
 import UserRoutes from './routes/user.js';
+import ajvErrors from 'ajv-errors';
 import jwt from '@fastify/jwt';
 import dotenv from "dotenv";
-import multipart from "@fastify/multipart";
-import ajvErrors from 'ajv-errors';
 
 
 
@@ -35,10 +35,10 @@ try {
 fastify.addHook('onClose', CloseHandler);
 fastify.addHook('onSend', SendHandler);
 
-fastify.register(ServiceManagerPlugin);
-
-fastify.register(UserRoutes, { prefix: '/v1/user' });
+// Register the plugins
 fastify.register(jwt, { secret: process.env.JWT || "supersecret" });
+fastify.register(UserRoutes, { prefix: '/v1/user' });
+fastify.register(ServiceManagerPlugin);
 fastify.register(multipart);
 
 [ 'SIGINT', 'SIGTERM' ]
