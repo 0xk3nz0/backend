@@ -1,36 +1,23 @@
-<<<<<<< HEAD
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
-import ServiceManagerPlugin from './plugins/service.js';
-=======
 import { configDotenv } from "dotenv";
 configDotenv();
 
-import Fastify, { type FastifyInstance } from 'fastify';
 import jwt from '@fastify/jwt';
 import fcookie from '@fastify/cookie';
+import multipart from "@fastify/multipart";
 
->>>>>>> b4894985a5a108782612ac9c43d66f3ca1bfc6ef
 import LoggingOpts from './utils/logger.js';
 
 import CloseHandler from './hooks/close.js';
-<<<<<<< HEAD
-import multipart from "@fastify/multipart";
-import UserRoutes from './routes/user.js';
-import SendHandler from './hooks/send.js'
-import jwt from '@fastify/jwt';
-=======
 import SendHandler from './hooks/send.js'
 import PreHandler from './hooks/pre.js'
-
-import { prisma as PrismaClientInstance } from './utils/prisma.js';
 
 import UserRoutes from './routes/user.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 
->>>>>>> b4894985a5a108782612ac9c43d66f3ca1bfc6ef
 
 
 export const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
@@ -49,19 +36,17 @@ fastify.register(fcookie, {
     secret: process.env.CKE_SECRET || "supersecret",
     hook: 'preHandler'
 });
+
 fastify.register(ServiceManagerPlugin);
-<<<<<<< HEAD
-fastify.register(jwt, { secret: "supersecret" });
+fastify.register(JWTAuthenticationPlugin);
+
+fastify.register(UserRoutes, { prefix: '/v1/user' });
+
 fastify.register(multipart, {
     limits: {
         fileSize: 10 * 1024 * 1024 // 10 MB
     }
 });
-=======
-fastify.register(JWTAuthenticationPlugin);
->>>>>>> b4894985a5a108782612ac9c43d66f3ca1bfc6ef
-
-fastify.register(UserRoutes, { prefix: '/v1/user' });
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {
