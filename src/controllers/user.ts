@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
+import { fastify, type FastifyInstance, type FastifyPluginOptions, type FastifyReply, type FastifyRequest } from "fastify";
 import type UserModel from "models/user.js";
 import type { UserServiceError_t } from "services/user.js";
 
@@ -21,7 +21,7 @@ export const userRegisterController = async (
             password: request.body.password
         });
         if (!user) {
-            reply.code(500).send({ message: 'Internal server error' });
+            reply.code(500).send({ message: 'Internal server error, can not create user' });
         } else {
             reply.code(201).send({
                 message: 'user created!',

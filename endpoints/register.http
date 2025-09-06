@@ -6,7 +6,7 @@ GET http://localhost:3000/v1/user/68aebee3-8c70-4675-9e9b-1cf2b5bd05ea HTTP/1.1
 
 
 ### Delete all
-DELETE  http://localhost:3000/v1/user/ HTTP/1.1
+# DELETE  http://localhost:3000/v1/user/ HTTP/1.1
 
 
 ### Create new user
@@ -14,9 +14,9 @@ POST http://localhost:3000/v1/user/register HTTP/1.1
 Content-Type: application/json
 
 {
-    "name": "azizo",
-    "email": "ziz@azizo.com",
-    "password": "Aziz123456$"
+    "name": "azio",
+    "email": "ziz@azaio.com",
+    "password": "Aziz123456@"
 }
 
 ###

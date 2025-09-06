@@ -8,11 +8,21 @@ import UserRoutes from './routes/user.js';
 import jwt from '@fastify/jwt';
 import dotenv from "dotenv";
 import multipart from "@fastify/multipart";
+import ajvErrors from 'ajv-errors';
 
 
 
 dotenv.config();
-const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
+const fastify: FastifyInstance = Fastify({
+    logger: LoggingOpts,
+    ajv: {
+        customOptions: { 
+        allErrors: true,   // show all errors
+        strict: false,     // allow unknown keywords
+        },
+        plugins: [ajvErrors] // enable ajv-errors
+    }
+});
 
 try {
     await PrismaClientInstance.$connect();
