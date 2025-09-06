@@ -1,6 +1,6 @@
 import { userRegisterController, userUploadHandler, userLoginController, userProfileUpdateController, userProfileController } from "../controllers/user.js";
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from "fastify";
-import { userRegisterSchema, userLoginSchema, userProfileUpdateSchema } from "schemas/user.js";
+import { userRegisterSchema, userLoginSchema, userProfileSchema, userProfileUpdateSchema } from "schemas/user.js";
 
 
 
