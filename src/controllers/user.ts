@@ -61,7 +61,6 @@ export const userRegisterController = async (
     // 1. Check if user exists
     const isUserExist = await prisma.user.findUnique({ 
         where: { email }
-        // where: { OR: [{ email }, { name }] },
     });
 
     if (isUserExist) {
@@ -80,16 +79,6 @@ export const userRegisterController = async (
             password: hashedPassword,
         }
     });
-
-    // 4. Generate JWT
-    /**
-     * @warning you don't need to generate anything here
-     *          since all you do is registering the user
-     *          adding it into the database doesn't need
-     *          a JWT token !
-     * @note    it will be needed when logging in !
-     */
-    // const token = request.server.jwt.sign({ id: user.id, email: user.email });
 
     reply.code(201).send({
         message: '201 Created',
