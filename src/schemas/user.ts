@@ -78,11 +78,29 @@ export const userLoginSchema = {
     }
 };
 
+export const userProfileSchema = {
+    response: {
+        200: {
+            type: 'object',
+            properties: {
+                uid: { type: 'string' },
+                name: { type: 'string' },
+                createdAt: { type: 'string' }
+            }
+        },
+        401: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' }
+            }
+        }
+    }
+};
+
 export const userProfileUpdateSchema = {
     body: {
         type: 'object',
         properties: {
-            id: { type: 'string' },
             field: {
                 type: 'string',
                 enum: [
@@ -91,17 +109,16 @@ export const userProfileUpdateSchema = {
                 ]
             },
             value: { type: 'string' }
-        }
+        },
+        required: [ 'field', 'value' ]
     },
     response: {
         200: {
             type: 'object',
             properties: {
-                uid: { type: 'string' },
                 message: { type: 'string' }
             },
-            required: [ 'uid', 'message' ],
-            additionalProperties: true
+            required: [ 'message' ]
         }
     }
 };
