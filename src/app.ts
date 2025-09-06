@@ -1,17 +1,17 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import { configDotenv } from "dotenv";
 configDotenv();
 
-import Fastify, { type FastifyInstance } from 'fastify';
 import jwt from '@fastify/jwt';
 import fcookie from '@fastify/cookie';
+import multipart from "@fastify/multipart";
 
 import LoggingOpts from './utils/logger.js';
 
 import CloseHandler from './hooks/close.js';
 import SendHandler from './hooks/send.js'
 import PreHandler from './hooks/pre.js'
-
-import { prisma as PrismaClientInstance } from './utils/prisma.js';
 
 import UserRoutes from './routes/user.js';
 
@@ -20,7 +20,7 @@ import JWTAuthenticationPlugin from './plugins/jwt.js';
 
 
 
-const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
+export const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
 
 await PrismaClientInstance.$connect();
 fastify.log.info('Prisma connected ✅');
@@ -36,6 +36,12 @@ fastify.register(fcookie, {
     secret: process.env.CKE_SECRET || "supersecret",
     hook: 'preHandler'
 });
+fastify.register(multipart, {
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10 MB
+    }
+});
+
 fastify.register(ServiceManagerPlugin);
 fastify.register(JWTAuthenticationPlugin);
 
