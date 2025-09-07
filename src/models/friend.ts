@@ -10,7 +10,7 @@ export interface SendFriendRequestInput {
 };
 
 export interface ResolveFriendRequestInput {
-    requested_uid: string; // the user that the friend request was sent from
+    request_id: string;
     action: boolean;
 };
 
