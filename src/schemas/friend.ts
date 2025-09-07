@@ -22,9 +22,9 @@ export const sendFriendRequestSchema = {
 export const resolveFriendRequestSchema = {
     body: {
         type: 'object',
-        required: ['requested_uid', 'action'],
+        required: ['request_id', 'action'],
         properties: {
-            requested_uid: { type: 'string' },
+            request_id: { type: 'string' },
             action: { type: 'boolean' }
         }
     },
@@ -51,13 +51,8 @@ export const resolveFriendRequestSchema = {
 export const getFriendsSchema = {
     response: {
         200: {
-            type: 'object',
-            properties: {
-                friendPendingIds: {
-                    type: 'array',
-                    items: { type: 'string' }
-                }
-            }
+            type: 'array',
+            items: { type: 'string' }
         }
     }
 }
@@ -65,13 +60,17 @@ export const getFriendsSchema = {
 export const getPendingRequestsSchema = {
     response: {
         200: {
-            type: 'object',
-            properties: {
-                friendPendingIds: {
-                    type: 'array',
-                    items: { type: 'string' }
-                }
-            }
+            type: 'array',
+            items: { type: 'string' }
         }
     }
 }
+
+export const getIncomingRequestsSchema = {
+    response: {
+        200: {
+            type: 'array',
+            items: { type: 'string' }
+        }
+    }
+};
