@@ -1,7 +1,7 @@
 import type {FastifyInstance} from "fastify";
 
 import DataBaseWrapper from "../utils/prisma.js";
-import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "utils/service-error.js";
+import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "../utils/service-error.js";
 import type {UserServiceError_t} from "./user.js";
 import type FriendRequest from "../models/friend.js";
 
