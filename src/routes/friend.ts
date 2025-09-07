@@ -1,5 +1,17 @@
-import { getFriendsController, getPendingRequestsController, resolveFriendRequestController, sendFriendRequestController } from "../controllers/friend.js";
-import { getFriendsSchema, getPendingRequestsSchema, resolveFriendRequestSchema, sendFriendRequestSchema } from "../schemas/friend.js";
+import {
+    getFriendsController,
+    getIncomingRequestsController,
+    getPendingRequestsController,
+    resolveFriendRequestController,
+    sendFriendRequestController
+} from "../controllers/friend.js";
+import {
+    getFriendsSchema,
+    getIncomingRequestsSchema,
+    getPendingRequestsSchema,
+    resolveFriendRequestSchema,
+    sendFriendRequestSchema
+} from "../schemas/friend.js";
 import type {FastifyInstance, FastifyPluginOptions} from "fastify";
 
 
@@ -27,6 +39,12 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     fastify.get('/pending', {
         schema: getPendingRequestsSchema,
         handler: getPendingRequestsController,
+        preHandler: [fastify.authentication_jwt]
+    });
+
+    fastify.get('/incoming', {
+        schema: getIncomingRequestsSchema,
+        handler: getIncomingRequestsController,
         preHandler: [fastify.authentication_jwt]
     });
 
