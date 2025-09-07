@@ -3,11 +3,11 @@ import type { FastifyInstance } from "fastify";
 import DataBaseWrapper from "../utils/prisma.js";
 import type UserModel from "../models/user.js";
 import { Prisma, type User } from "../generated/prisma/index.js";
-import ServiceError from "utils/service-error.js";
+import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "utils/service-error.js";
 
 
 
-export type UserServiceError_t = Error & { code: number, message?: string };
+export type UserServiceError_t = BaseServiceError_t;
 
 class UserServiceError extends ServiceError {
 
@@ -32,34 +32,6 @@ class UserServiceError extends ServiceError {
             },
             /// add more codes
         ]);
-    }
-
-    getErr(code: string): { code: number, message?: string } | undefined {
-        for (const e of this.codes) {
-            if (Object.keys(e)[0] === code) {
-                return e[code];
-            }
-        }
-        return {
-            code: 500,
-            message: `Prisma error code: ${code}`
-        };
-    }
-
-    handleError(
-        fastify: FastifyInstance,
-        service: string,
-        error: Prisma.PrismaClientKnownRequestError | Error
-    ): { code: number, message?: string } | undefined {
-        if (error instanceof Prisma.PrismaClientKnownRequestError) {
-            const err = this.getErr(error.code);
-            fastify.log.error(`[${service}] deleteBy(key, val) -> ${err}`);
-            return err;
-        } else if (error instanceof Error) {
-            fastify.log.error(`[${service}] deleteBy(key, val) -> ${error.message}`);
-        } else {
-            fastify.log.error(`[${service}] deleteBy(key, val) -> ${error}`);
-        }
     }
 
 };
@@ -91,7 +63,7 @@ export default class UserService extends DataBaseWrapper {
         this.errorHandler = new UserServiceError();
     }
 
-    throwErr(err: { code: number, message?: string } | undefined) {
+    throwErr(err: ServiceError_t | undefined) {
         if (err !== undefined) {
             const e: UserServiceError_t = Object.assign(new Error(err.message), {
                 code: err.code,
@@ -123,7 +95,13 @@ export default class UserService extends DataBaseWrapper {
      */
     public async create(user: UserModel): Promise<UserModel | Error> {
         try {
-            return await this.prisma.user.create({ data: { ...user } });;
+            return await this.prisma.user.create({
+                data: {
+                    name: user.name,
+                    email: user.email,
+                    password: user.password
+                }
+            });
         } catch (error: any) {
             let err = this.errorHandler.handleError(
                 this.fastify, this.service, error);

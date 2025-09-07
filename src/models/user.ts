@@ -1,10 +1,21 @@
-export default interface UserModel {
-    id?: string;
+import type FriendRequest from "./friend.js";
+
+
+
+export type UserJWTPayload = {
+    uid: string;
     name: string;
+    createdAt: string;
+};
+
+export interface UserUpdateInput {
+    field: string;
+    value: string;
+};
+
+export interface UserLoginInput {
     email: string;
     password: string;
-    createdAt?: Date;
-    updatedAt?: Date;
 };
 
 export interface UserRegisterInput {
@@ -13,25 +24,16 @@ export interface UserRegisterInput {
     password: string;
 };
 
-export interface UserLoginInput {
+export default interface UserModel {
+    id?: string;
+    name: string;
     email: string;
     password: string;
+    createdAt?: Date;
+    updatedAt?: Date;
+    avatar?: string;
+
+    sentRequests?: FriendRequest[];
+    receivedRequests?: FriendRequest[];
 };
 
-export interface UserUpdateInput {
-    field: string;
-    value: string;
-};
-
-// UserProfileOutput {
-//     id: string;
-//     name: string;
-//     avatar: string;
-//     createdAt: Date;
-// }
-
-export type UserJWTPayload = {
-    uid: string;
-    name: string;
-    createdAt: string;
-};
