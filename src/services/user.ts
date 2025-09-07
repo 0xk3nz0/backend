@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import DataBaseWrapper from "../utils/prisma.js";
 import type UserModel from "../models/user.js";
 import { Prisma, type User } from "../generated/prisma/index.js";
-import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "utils/service-error.js";
+import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "../utils/service-error.js";
 
 
 
