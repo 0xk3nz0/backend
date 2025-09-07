@@ -85,6 +85,7 @@ export const userProfileSchema = {
             properties: {
                 uid: { type: 'string' },
                 name: { type: 'string' },
+                avatar: { type: 'string' },
                 createdAt: { type: 'string' }
             }
         },
