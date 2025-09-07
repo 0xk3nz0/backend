@@ -1,13 +1,11 @@
 import type {FastifyInstance} from "fastify";
 
 import DataBaseWrapper from "../utils/prisma.js";
-import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "../utils/service-error.js";
-import type {UserServiceError_t} from "./user.js";
+import ServiceError, { type ServiceError_t } from "../utils/service-error.js";
+import type { FriendServiceError_t } from "./user.js";
 import type FriendRequest from "../models/friend.js";
 
 
-
-export type FriendServiceError_t = BaseServiceError_t;
 
 class FriendServiceError extends ServiceError {
 
@@ -40,7 +38,7 @@ export default class FriendService extends  DataBaseWrapper {
 
     throwErr(err: ServiceError_t | undefined) {
         if (err !== undefined) {
-            const e: UserServiceError_t = Object.assign(new Error(err.message), {
+            const e: FriendServiceError_t = Object.assign(new Error(err.message), {
                 code: err.code,
                 message: err.message
             });
@@ -60,8 +58,8 @@ export default class FriendService extends  DataBaseWrapper {
     private async craftRequest(sender_id: string, receiver_id: string): Promise<FriendRequest> {
         let request = await this.prisma.friendRequest.create({
             data: {
-                requested: { connect: { id: sender_id } },
-                requester: { connect: { id: receiver_id } }
+                requested: { connect: { id: receiver_id } },
+                requester: { connect: { id: sender_id } }
             },
             include: {
                 requested: true,
@@ -87,14 +85,40 @@ export default class FriendService extends  DataBaseWrapper {
      * @returns The created FriendRequest object
      * @throws Error if either user ID is invalid
      */
-    public async sendRequest(sender_uid: string, receiver_uid: string): Promise<FriendRequest> {
+    public async sendRequest(sender_uid: string, receiver_uid: string): Promise<FriendRequest | undefined> {
         if (
             await this.fastify.service.user.fetchBy({ id: sender_uid }) === null ||
             await this.fastify.service.user.fetchBy({ id: receiver_uid }) === null
         ) {
-            throw Error(`[${this.service}] | sendRequest(sender_uid, receiver_uid) -> valid user id's are required!`);
+            this.throwErr({
+                code: 400,
+                message: 'valid user id\'s are required!'
+            });
+        } else if (sender_uid === receiver_uid) {
+            this.throwErr({
+                code: 409,
+                message: 'hold on, y\'all are the same person!'
+            });
+        } else if ((await this.getFriends(sender_uid)).includes(receiver_uid)) {
+            this.throwErr({
+                code: 409,
+                message: 'you guy\'s are already friends!'
+            });
         } else {
-            return this.craftRequest(sender_uid, receiver_uid);
+            const reqs = await this.prisma.friendRequest.findMany({
+                where: {
+                    requestedId: receiver_uid,
+                    status: 'PENDING'
+                }
+            });
+            if (reqs.length > 0) {
+                this.throwErr({
+                    code: 409,
+                    message: 'there\'s already a pending request'
+                });
+            } else {
+                return await this.craftRequest(sender_uid, receiver_uid);
+            }
         }
     }
 
@@ -152,11 +176,14 @@ export default class FriendService extends  DataBaseWrapper {
      */
     public async getFriends(uid: string): Promise<string[]> {
         try {
-            const acceptedRequests: FriendRequest[] = await this.prisma.friendRequest.findMany(
+            const friendRequests: FriendRequest[] = await this.prisma.friendRequest.findMany(
                 {
                     where: {
                         status: "ACCEPTED",
-                        requesterId: uid
+                        OR: [
+                            { requesterId: uid },
+                            { requestedId: uid },
+                        ]
                     },
                     include: {
                         requested: true,
@@ -165,9 +192,13 @@ export default class FriendService extends  DataBaseWrapper {
                 }
             );
             let friends: string[] = [];
-            for (const request of acceptedRequests) {
-                if (request.requestedId) {
-                    friends.push(request.requestedId);
+            for (const request of friendRequests) {
+                if (request.requestedId && request.requesterId) {
+                    friends.push(
+                        request.requestedId === uid ?
+                            request.requesterId :
+                            request.requestedId
+                    );
                 }
             }
             return friends;
@@ -196,6 +227,32 @@ export default class FriendService extends  DataBaseWrapper {
                     where: {
                         status: "PENDING",
                         requesterId: uid
+                    },
+                    include: {
+                        requested: true,
+                        requester: true
+                    }
+                }
+            );
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error
+            );
+            if (err === undefined) {
+                throw Error("unknown error!");
+            } else {
+                throw this.throwErr(err);
+            }
+        }
+    }
+
+    public async getIncomingRequests(uid: string): Promise<FriendRequest[]> {
+        try {
+            return this.prisma.friendRequest.findMany(
+                {
+                    where: {
+                        status: "PENDING",
+                        requestedId: uid
                     },
                     include: {
                         requested: true,
