@@ -3,28 +3,40 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { SendFriendRequestInput } from "../models/friend.js";
 import type { ResolveFriendRequestInput } from "../models/friend.js";
 import type FriendService from "../services/friend.js";
+import { isServiceError } from "../utils/service-error.js";
 
 
 
 export const sendFriendRequestController = async (
     req: FastifyRequest<{ Body: SendFriendRequestInput }>, res: FastifyReply
 ): Promise<void> => {
-    const friendReq: FriendRequest = await req.server.service.friend.sendRequest(
-        req.user.uid, req.body.requested_uid);
-    res.code(200).send({
-        request: friendReq
-    });
+    try {
+        const friendReq: FriendRequest | undefined = await req.server.service.friend.sendRequest(
+            req.user.uid, req.body.requested_uid);
+        res.code(200).send({
+            request: friendReq
+        });
+    } catch (e: unknown) {
+        if (isServiceError(e)) {
+            res.code(e.code).send({
+                message: e.message
+            });
+        } else {
+            throw e;
+        }
+    }
 }
 
 export const resolveFriendRequestController = async (
     req: FastifyRequest<{ Body: ResolveFriendRequestInput }>, res: FastifyReply
 ): Promise<void> => {
     const friendMS: FriendService = req.server.service.friend;
-    const pendingFReqs: FriendRequest[] = await friendMS.getPendingRequests(
+    const incomingFReqs: FriendRequest[] = await friendMS.getIncomingRequests(
         req.user.uid
     );
-    const targetFReq: FriendRequest | undefined = pendingFReqs
-        .filter((freq) => freq.requestedId === req.body.requested_uid)[0];
+    req.server.log.debug(incomingFReqs);
+    const targetFReq: FriendRequest | undefined = incomingFReqs
+        .filter((freq) => freq.id === req.body.request_id)[0];
     if (!targetFReq) {
         res.code(404).send({
             message: "Friend request not found"
@@ -54,9 +66,7 @@ export const getFriendsController = async (
 ): Promise<void> => {
     const friendMS: FriendService = req.server.service.friend;
     const friends: string[] = await friendMS.getFriends(req.user.uid);
-    res.code(200).send({
-        friendIds: friends
-    });
+    res.code(200).send(friends);
 }
 
 export const getPendingRequestsController = async (
@@ -67,7 +77,16 @@ export const getPendingRequestsController = async (
     const pendingFriendIds: string[] = pendingFriendRequests
         .map((freq) => freq.id)
         .filter((fid) => fid !== undefined);
-    res.code(200).send({
-        friendPendingIds: pendingFriendIds
-    });
+    res.code(200).send(pendingFriendIds);
+}
+
+export const getIncomingRequestsController = async (
+    req: FastifyRequest, res: FastifyReply
+): Promise<void> => {
+    const incomingFriendRequests: FriendRequest[] = await req.server.service.friend
+        .getIncomingRequests(req.user.uid);
+    const incomingFriendIds: string[] = incomingFriendRequests
+        .map((freq) => freq.id)
+        .filter((fid) => fid !== undefined);
+    res.code(200).send(incomingFriendIds);
 }
