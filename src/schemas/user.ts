@@ -14,10 +14,11 @@ export const userRegisterSchema = {
             password: {
                 type: 'string',
                 minLength: 8,
-                // pattern: '^(?=.*[A-Za-z])(?=.*\\d)[A-Za-z\\d]{8,}$'
-                // ✅ at least 8 chars, one letter, one number
+                errorMessage: 'passwors too weak'
             }
-        }
+        },
+        errorMessage: 'The body must have name, email, and a strong password',
+        additionalProperties: false
     },
     response: {
         201: {

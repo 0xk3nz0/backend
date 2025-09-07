@@ -1,0 +1,2 @@
+###
+GET ws://localhost:3000/v1/ws/chat/room1 HTTP/1.1

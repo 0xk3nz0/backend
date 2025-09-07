@@ -6,7 +6,7 @@ import type UserModel from "../models/user.js";
 import { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { UserRegisterInput, UserLoginInput, UserUpdateInput } from "../models/user.js";
 
-
+// ======  Heisenberg Part  ====== //
 
 const UPLOAD_DIR = "/home/kali/Desktop/PFE/backend/public/images";
 
@@ -89,6 +89,13 @@ export const userRegisterController = async (
         }
     });
 }
+
+// Chat handler
+// export const chatWebsocketHandler = async (webSocket: WebSocket, request: FastifyRequest) => {
+
+// }
+
+// ======  Lh4j Part  ====== //
 
 export const userLoginController = async (
     req: FastifyRequest<{ Body: UserLoginInput }>, rep: FastifyReply

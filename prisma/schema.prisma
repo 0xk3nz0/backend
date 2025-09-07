@@ -23,5 +23,55 @@ model User {
   updatedAt DateTime @updatedAt
   avatar    String   @default("../public/images/default-avatar.jpg")
 
+  sentMessages      Message[] @relation("MessageSender")
+  receivedMessages  Message[] @relation("MessageReceiver")
+  roomMembers       RoomMember[]
+
   @@index([name, email])
+}
+
+model Room {
+  id        String @id @default(uuid())
+  name      String
+  type      RoomType @default(GROUP)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages  Message[]
+  members   RoomMember[]
+}
+
+model RoomMember {
+  id        String @id @default(uuid())
+  userId    String
+  roomId    String
+  role      MemberRole @default(MEMBER)
+  joinedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id          String    @id @default(uuid())
+  content     String
+  senderId    String
+  receiverId  String?
+  roomId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sender    User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver  User? @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  room      Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}
+
+enum RoomType {
+  DIRECT
+  GROUP
+}
+
+enum MemberRole {
+  ADMIN
+  MEMBER
 }
