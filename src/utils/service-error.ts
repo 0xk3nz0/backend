@@ -13,6 +13,15 @@ type PErrRecord = {
     }
 };
 
+export const isServiceError = (err: unknown): err is BaseServiceError_t => {
+    return (
+        typeof err === "object" &&
+        err !== null &&
+        "code" in err &&
+        typeof (err as any).code === "number"
+    );
+}
+
 export default abstract class ServiceError {
     codes: Array<PErrRecord>;
 
