@@ -8,6 +8,7 @@ import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "../uti
 
 
 export type UserServiceError_t = BaseServiceError_t;
+export type FriendServiceError_t = BaseServiceError_t;
 
 class UserServiceError extends ServiceError {
 
