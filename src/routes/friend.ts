@@ -8,22 +8,26 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
 
     fastify.post('/request', {
         schema: sendFriendRequestSchema,
-        handler: sendFriendRequestController
+        handler: sendFriendRequestController,
+        preHandler: [fastify.authentication_jwt]
     });
 
     fastify.put('/respond', {
         schema: resolveFriendRequestSchema,
-        handler: resolveFriendRequestController
+        handler: resolveFriendRequestController,
+        preHandler: [fastify.authentication_jwt]
     });
 
     fastify.get('/friends', {
         schema: getFriendsSchema,
-        handler: getFriendsController
+        handler: getFriendsController,
+        preHandler: [fastify.authentication_jwt]
     });
 
     fastify.get('/pending', {
         schema: getPendingRequestsSchema,
-        handler: getPendingRequestsController
+        handler: getPendingRequestsController,
+        preHandler: [fastify.authentication_jwt]
     });
 
 };
