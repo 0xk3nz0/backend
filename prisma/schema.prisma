@@ -14,6 +14,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/**
+ * Represents the state of a friend request between two users:
+ * - PENDING  → The request has been sent but not answered yet
+ * - ACCEPTED → The request was accepted, users are now friends
+ * - REJECTED → The request was declined
+ */
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+/**
+ * Represents a system user.
+ * Fields:
+ * - name      → Unique display name
+ * - email     → Unique email address
+ * - password  → User's hashed password
+ * - createdAt → Timestamp when the user was created
+ * - updatedAt → Timestamp of the last update
+ * - avatar    → URL or path to the user's avatar image
+ * - sentRequests     → Friend requests this user has sent
+ * - receivedRequests → Friend requests this user has received
+ */
 model User {
   id        String   @id @default(uuid())
   name      String   @unique
@@ -23,5 +47,25 @@ model User {
   updatedAt DateTime @updatedAt
   avatar    String   @default("../public/images/default-avatar.jpg")
 
+  sentRequests     FriendRequest[] @relation("RequestSent")
+  receivedRequests FriendRequest[] @relation("RequestReceived")
+
   @@index([name, email])
+}
+
+/**
+ * Represents a friend request between two users.
+ * - requester → The user who sent the request
+ * - requested → The user who received the request
+ * - status    → Current state of the request (PENDING, ACCEPTED, REJECTED)
+ * - timestamp → Auto-set to the time the request was created
+ */
+model FriendRequest {
+  id          String              @id @default(uuid())
+  requester   User                @relation("RequestSent", fields: [requesterId], references: [id])
+  requested   User                @relation("RequestReceived", fields: [requestedId], references: [id])
+  status      FriendRequestStatus @default(PENDING)
+  timestamp   DateTime            @default(now())
+  requesterId String
+  requestedId String
 }

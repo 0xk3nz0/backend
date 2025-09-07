@@ -8,7 +8,19 @@ import type { UserRegisterInput, UserLoginInput, UserUpdateInput } from "../mode
 
 
 
-const UPLOAD_DIR = "/home/kali/Desktop/PFE/backend/public/images";
+/**
+ * @warning @Aziz018 i suppose not everyone uses kali, ... right?
+ *          + i don't think it's a good idea to put this variable here
+ *          i mean we should create a consts.ts file and have those
+ *          variables exported out of it ... !
+ *          we could export those
+ *              - UPLOAD_DIR
+ *              - DEFAULT_JWT_KEY
+ *              - DEFAULT_CKE_KEY
+ *          instead of "supersecret", ... or put this UPLOAD_DIR
+ *          in the .env file ... ?!
+ */
+const UPLOAD_DIR = "./public/images";
 
 export const userUploadHandler = async (request: FastifyRequest<{ Body: { description: string } }>, reply: FastifyReply) => {
 
@@ -136,11 +148,16 @@ export const userLoginController = async (
 export const userProfileController = async (
     req: FastifyRequest, rep: FastifyReply
 ): Promise<void> => {
-    rep.code(200).send({
-        uid: req.user.uid,
-        name: req.user.name,
-        createdAt: req.user.createdAt
-    });
+    const user: UserModel | null = await req.server.service.user.fetchBy(
+        { id: req.user.uid });
+    if (user !== null) {
+        rep.code(200).send({
+            uid: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            createdAt: user.createdAt
+        });
+    }
 }
 
 export const userProfileUpdateController = async (

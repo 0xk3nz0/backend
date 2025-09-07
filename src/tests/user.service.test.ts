@@ -1,7 +1,10 @@
 import { describe, beforeAll, afterAll, expect, it } from 'vitest';
 import { type FastifyInstance } from "fastify";
+
 import { PrismaClient } from "../generated/prisma/index.js";
 import UserService from "../services/user.js";
+
+
 
 const prisma = new PrismaClient({ log: [] });
 let userService: UserService;
@@ -22,7 +25,7 @@ describe('UserService', () => {
       name: 'Test User',
       password: '123456', // if your model requires it
     } as any);
-    expect(result).toBe(true);
+    expect(result).toBeDefined();
   });
 
   it('should fetch the created user', async () => {

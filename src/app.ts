@@ -14,7 +14,7 @@ import SendHandler from './hooks/send.js'
 import PreHandler from './hooks/pre.js'
 
 import UserRoutes from './routes/user.js';
-import TestRoutes from './routes/test.js';
+import FriendRoutes from './routes/friend.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
@@ -38,17 +38,14 @@ fastify.register(fcookie, {
     hook: 'preHandler'
 });
 fastify.register(multipart, {
-    limits: {
-        fileSize: 10 * 1024 * 1024 // 10 MB
-    }
+    limits: { fileSize: 10 * 1024 * 1024 } // 10 MB
 });
 
 fastify.register(ServiceManagerPlugin);
 fastify.register(JWTAuthenticationPlugin);
 
 fastify.register(UserRoutes, { prefix: '/v1/user' });
-fastify.register(TestRoutes, { prefix: '/v1/user' });
-
+fastify.register(FriendRoutes, { prefix: '/v1/friend' });
 
 [ 'SIGINT', 'SIGTERM' ]
 .forEach((signal_: string) => {

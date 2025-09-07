@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import type { PrismaClientKnownRequestError } from "generated/prisma/runtime/library.js";
+import { PrismaClientKnownRequestError } from "../generated/prisma/runtime/library.js";
 
 
+
+export type ServiceError_t = { code: number, message?: string };
+export type BaseServiceError_t = Error & ServiceError_t;
 
 type PErrRecord = {
     [key: string]: {
@@ -10,14 +13,50 @@ type PErrRecord = {
     }
 };
 
+export const isServiceError = (err: unknown): err is BaseServiceError_t => {
+    return (
+        typeof err === "object" &&
+        err !== null &&
+        "code" in err &&
+        typeof (err as any).code === "number"
+    );
+}
+
 export default abstract class ServiceError {
     codes: Array<PErrRecord>;
 
-    constructor () {
+    protected constructor () {
         this.codes = [];
     }
 
-    abstract handleError(fastify: FastifyInstance, service: string, error: PrismaClientKnownRequestError | Error): { code: number, message?: string } | undefined;
+    abstract setupCodes(): void;
+
+    getErr(code: string): ServiceError_t | undefined {
+        for (const e of this.codes) {
+            if (Object.keys(e)[0] === code) {
+                return e[code];
+            }
+        }
+        return {
+            code: 500,
+            message: `Prisma error code: ${code}`
+        };
+    }
+
+    handleError(
+        fastify: FastifyInstance,
+        service: string,
+        error: PrismaClientKnownRequestError | Error
+    ): ServiceError_t | undefined {
+        if (error instanceof PrismaClientKnownRequestError) {
+            const err = this.getErr(error.code);
+            fastify.log.error(`[${service}] -> ${err}`);
+            return err;
+        } else {
+            fastify.log.error(`[${service}] -> ${error.message}`);
+        }
+    }
+
 }
 
 // 'P2000': { code: 400 },
