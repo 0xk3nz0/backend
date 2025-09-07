@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { PrismaClientKnownRequestError } from "generated/prisma/runtime/library.js";
+import { PrismaClientKnownRequestError } from "../generated/prisma/runtime/library.js";
 
 
 
