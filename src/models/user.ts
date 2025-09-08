@@ -4,7 +4,6 @@ import type FriendRequest from "./friend.js";
 
 export type UserJWTPayload = {
     uid: string;
-    name: string;
     createdAt: string;
 };
 
