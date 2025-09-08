@@ -121,11 +121,12 @@ export const userLoginController = async (
         if (isValid) {
             const payload = {
                 uid: user.id,
-                name: user.name,
                 createdAt: user.createdAt
             };
 
-            const token = req.jwt.sign(payload);
+            const token = req.jwt.sign(payload, {
+                expiresIn: "1h"
+            });
 
             rep.setCookie('access_token', token, {
                 path: '/',
