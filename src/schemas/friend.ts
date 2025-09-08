@@ -1,4 +1,4 @@
-import {getPendingRequestsController} from "../controllers/friend.js";
+
 
 
 export const sendFriendRequestSchema = {
