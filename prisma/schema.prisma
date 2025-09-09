@@ -69,3 +69,17 @@ model FriendRequest {
   requesterId String
   requestedId String
 }
+
+/**
+ * Stores JWTs that have been invalidated before their natural expiry,
+ * - id → Auto-incrementing primary key.
+ * - token → The JWT string, must be unique.
+ * - expiresAt → Original expiration time of the token.
+ * - createdAt → Timestamp when the token was blacklisted.
+ */
+model BlacklistedToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
