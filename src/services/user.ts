@@ -10,6 +10,22 @@ import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "../uti
 export type UserServiceError_t = BaseServiceError_t;
 export type FriendServiceError_t = BaseServiceError_t;
 
+/**
+ * UserServiceError
+ *
+ * Specialized error handler for user-related service operations.
+ * Extends the abstract ServiceError class to map specific Prisma error codes
+ * (such as unique constraint violations and record not found) to HTTP status codes
+ * and user-friendly error messages for the UserService.
+ *
+ * Responsibilities:
+ * - Define and register error code mappings relevant to user operations.
+ * - Provide consistent error responses for user CRUD actions.
+ *
+ * Example mapped codes:
+ *   - P2025: User record doesn't exist (404)
+ *   - P2002: User record already exists (409)
+ */
 class UserServiceError extends ServiceError {
 
     constructor () {

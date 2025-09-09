@@ -13,6 +13,11 @@ type PErrRecord = {
     }
 };
 
+/**
+ * Checks if the given error is a ServiceError (has a numeric `code` property).
+ * @param err - The error to check.
+ * @returns True if the error is a ServiceError, false otherwise.
+ */
 export const isServiceError = (err: unknown): err is BaseServiceError_t => {
     return (
         typeof err === "object" &&
@@ -22,6 +27,10 @@ export const isServiceError = (err: unknown): err is BaseServiceError_t => {
     );
 }
 
+/**
+ * Abstract base class for service-level error handling.
+ * Provides a mechanism to map Prisma error codes to HTTP status codes and messages.
+ */
 export default abstract class ServiceError {
     codes: Array<PErrRecord>;
 

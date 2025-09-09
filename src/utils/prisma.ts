@@ -3,6 +3,9 @@ import { PrismaClient } from "../generated/prisma/index.js";
 
 
 
+/**
+ * Singleton PrismaClient instance for database access.
+ */
 export const prisma = new PrismaClient({ log: ['query', 'info', 'warn'] });
 
 /**
