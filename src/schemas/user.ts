@@ -123,3 +123,30 @@ export const userProfileUpdateSchema = {
         }
     }
 };
+
+export const userLogoutSchema = {
+    response: {
+        200: {
+            type: 'object',
+            properties: {
+                message: { type: 'string' }
+            }
+        },
+        400: {
+            type: 'object',
+            properties: {
+                statusCode: { type: 'number' },
+                error: { type: 'string' },
+                message: { type: 'string' }
+            }
+        },
+        401: {
+            type: 'object',
+            properties: {
+                statusCode: { type: 'number' },
+                error: { type: 'string' },
+                message: { type: 'string' }
+            }
+        }
+    }
+}
