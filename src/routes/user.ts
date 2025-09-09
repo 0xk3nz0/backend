@@ -1,6 +1,19 @@
-import { userRegisterController, userUploadHandler, userLoginController, userProfileUpdateController, userProfileController } from "../controllers/user.js";
+import {
+    userRegisterController,
+    userUploadHandler,
+    userLoginController,
+    userProfileUpdateController,
+    userProfileController,
+    userLogoutController
+} from "../controllers/user.js";
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
-import { userRegisterSchema, userLoginSchema, userProfileSchema, userProfileUpdateSchema } from "schemas/user.js";
+import {
+    userRegisterSchema,
+    userLoginSchema,
+    userProfileSchema,
+    userProfileUpdateSchema,
+    userLogoutSchema
+} from "schemas/user.js";
 
 
 
@@ -43,6 +56,12 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
         handler: userProfileUpdateController,
         preHandler: [fastify.authentication_jwt]
     });
+
+    fastify.post('/logout', {
+        schema: userLogoutSchema,
+        handler: userLogoutController,
+        preHandler: [fastify.authentication_jwt]
+    })
 
 };
 

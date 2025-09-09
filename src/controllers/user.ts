@@ -196,3 +196,38 @@ export const userProfileUpdateController = async (
         message: 'success!'
     });
 }
+
+export const userLogoutController = async (
+    req: FastifyRequest, rep: FastifyReply
+): Promise<void> => {
+    const token = req.cookies.access_token;
+    if (!token) {
+        return rep.code(401).send({
+            statusCode: 401,
+            error: 'Unauthorized',
+            message: 'you\'re not logged in!'
+        })
+    }
+
+    try {
+        const decoded = req.jwt.decode<{ exp?: number }>(token);
+        if (decoded?.exp) {
+            await prisma.blacklistedToken.create({
+                data: {
+                    token,
+                    expiresAt: new Date(decoded.exp * 1000)
+                }
+            });
+        }
+        rep.clearCookie('access_token', { path: '/' });
+        rep.code(200).send({
+            message: 'logger-out successfully!'
+        });
+    } catch (error) {
+        rep.code(400).send({
+            statusCode: 400,
+            error: 'Bad Request!',
+            message: 'Invalid token'
+        });
+    }
+}

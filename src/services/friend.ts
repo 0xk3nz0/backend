@@ -7,6 +7,9 @@ import type FriendRequest from "../models/friend.js";
 
 
 
+/**
+ * Error handler for FriendService, extends ServiceError for friend-specific codes.
+ */
 class FriendServiceError extends ServiceError {
 
     constructor() {
