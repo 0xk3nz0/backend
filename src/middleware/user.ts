@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { FastifyJWT } from "@fastify/jwt";
+import {prisma} from "../utils/prisma.js";
 
 
 
@@ -28,6 +29,18 @@ export const JWTAuthentication = async (
             message: "Authentication required"
         });
     }
+
+    const isBlackListed = await prisma.blacklistedToken.findUnique({
+        where: { token }
+    });
+    if (isBlackListed) {
+        return rep.code(401).send({
+            statusCode: 401,
+            error: 'Unauthorized!',
+            message: 'token blacklisted, please login again!'
+        });
+    }
+
     const decoded = req.jwt.verify<FastifyJWT['user']>(token);
     req.user = decoded;
 }
