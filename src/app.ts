@@ -1,13 +1,7 @@
-import Fastify, { type FastifyInstance } from 'fastify';
-import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import { configDotenv } from "dotenv";
 configDotenv();
 
-import jwt from '@fastify/jwt';
-import fcookie from '@fastify/cookie';
-import multipart from "@fastify/multipart";
-
-import LoggingOpts from './utils/logger.js';
+import Server, { fastify } from "./server.js";
 
 import CloseHandler from './hooks/close.js';
 import SendHandler from './hooks/send.js'
@@ -18,55 +12,59 @@ import FriendRoutes from './routes/friend.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
+import type {FastifyRequest} from "fastify";
 
 
-
-export const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
-
-await PrismaClientInstance.$connect();
-fastify.log.info('Prisma connected ✅');
-
-fastify.addHook('onClose', CloseHandler);
-fastify.addHook('onSend', SendHandler);
-fastify.addHook('preHandler', PreHandler);
-
-fastify.register(jwt, {
-    secret: process.env.JWT_SECRET || "supersecret"
-});
-fastify.register(fcookie, {
-    secret: process.env.CKE_SECRET || "supersecret",
-    hook: 'preHandler'
-});
-fastify.register(multipart, {
-    limits: { fileSize: 10 * 1024 * 1024 } // 10 MB
-});
-
-fastify.register(ServiceManagerPlugin);
-fastify.register(JWTAuthenticationPlugin);
-
-fastify.register(UserRoutes, { prefix: '/v1/user' });
-fastify.register(FriendRoutes, { prefix: '/v1/friend' });
 
 [ 'SIGINT', 'SIGTERM' ]
-.forEach((signal_: string) => {
-    process.on(signal_, async () => {
-        await fastify.close();
-        process.exit(0x0);
-    });
+    .forEach((sig) => {
+        process.on(sig, () => {
+            console.log(`\nReceived ${sig}, shutting down...`);
+
+            fastify.close()
+                .then(() => {
+                    console.log("Fastify closed ✅");
+                    process.exit(0);
+                })
+                .catch((err) => {
+                    console.error(`Error closing Fastify: ${err.message}`);
+                    process.exit(1);
+                });
+        });
 });
 
-(async () => {
-    try {
-        await fastify.listen({
-            host: '0.0.0.0',
-            port: 3000
-        });
-    } catch (error) {
-        if (error instanceof Error) {
-            fastify.log.error(error.message);
-        } else {
-            fastify.log.error(error);
+const app: Server = new Server(
+    '0.0.0.0', 3000,
+    {
+        global: true,
+        max: 4,
+        timeWindow: 10 * 1000,
+        allowList: [],
+        addHeaders: true
+    },
+    [
+        {
+            pcb: UserRoutes,
+            opt: { prefix: '/v1/user' }
+        },
+        {
+            pcb: FriendRoutes,
+            opt: { prefix: '/v1/friend' }
         }
-        process.exit(0x1);
-    }
-})();
+    ],
+    {
+        'onClose': CloseHandler,
+        'onSend': SendHandler,
+        'preHandler': PreHandler,
+    },
+    {
+        jwt: process.env.JWT_SECRET || 'supersecret',
+        cookie: process.env.CKE_SECRET || 'supersecret'
+    },
+    [
+        ServiceManagerPlugin,
+        JWTAuthenticationPlugin
+    ]
+);
+
+await app.run();
