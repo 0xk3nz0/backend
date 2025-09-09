@@ -17,7 +17,7 @@ import CloseHandler from './hooks/close.js';
 
 import UserRoutes from './routes/user.js';
 import TestRoutes from './routes/test.js';
-import chatRoom from './routes/message.js';
+import { chatRoom } from './routes/message.js';
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 import ServiceManagerPlugin from './plugins/service.js';
@@ -57,7 +57,7 @@ fastify.register(websocket);
 fastify.register(ServiceManagerPlugin);
 fastify.register(JWTAuthenticationPlugin);
 
-fastify.register(chatRoom, { prefix: '/v1/ws' });
+fastify.register(chatRoom, { prefix: '/v1' });
 fastify.register(UserRoutes, { prefix: '/v1/user' });
 fastify.register(TestRoutes, { prefix: '/v1/user' });
 

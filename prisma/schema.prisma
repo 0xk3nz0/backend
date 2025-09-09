@@ -32,7 +32,7 @@ model User {
 
 model Room {
   id        String @id @default(uuid())
-  name      String
+  name      String?
   type      RoomType @default(GROUP)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
