@@ -12,7 +12,7 @@ import {
     resolveFriendRequestSchema,
     sendFriendRequestSchema
 } from "../schemas/friend.js";
-import type {FastifyInstance, FastifyPluginOptions} from "fastify";
+import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 
 
 
