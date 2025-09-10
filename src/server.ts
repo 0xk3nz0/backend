@@ -14,6 +14,7 @@ import jwt from '@fastify/jwt';
 import fcookie from '@fastify/cookie';
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
+import oauth2, { type FastifyOAuth2Options } from '@fastify/oauth2';
 
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import LoggingOpts from './utils/logger.js';
@@ -54,9 +55,10 @@ export type ServerRoute = {
  */
 export default class Server {
 
+    fastify: FastifyInstance;
     host: string;
     port: number;
-    fastify: FastifyInstance;
+    oauth_clients: FastifyOAuth2Options[];
     rateLimitOpts: FastifyRegisterOptions<any>;
     routes: ServerRoute[];
     hooks: Partial<Record<FastifyHookName, any>>;
@@ -66,6 +68,7 @@ export default class Server {
 
     constructor(
         host: string, port: number,
+        oauth_clients: FastifyOAuth2Options[],
         rateLimitOptions: FastifyRegisterOptions<any>,
         routes: ServerRoute[],
         hooks: Partial<Record<FastifyHookName, any>> = {},
@@ -78,6 +81,7 @@ export default class Server {
         ) {
         this.host = host;
         this.port = port;
+        this.oauth_clients = oauth_clients;
         this.fastify = fastify;
         this.hooks = hooks;
         this.secrets = secrets;
@@ -110,6 +114,7 @@ export default class Server {
         for (const plugin of this.plugins) {
             await this.fastify.register(plugin);
         }
+        await this.registerOAuthClients();
     }
 
     private registerRoutes(): void {
@@ -136,6 +141,12 @@ export default class Server {
             }
             reply.send(error);
         };
+    }
+
+    private async registerOAuthClients(): Promise<void> {
+        for (const clientOpt of this.oauth_clients) {
+            await this.fastify.register(oauth2, clientOpt);
+        }
     }
 
     private async start(): Promise<void> {

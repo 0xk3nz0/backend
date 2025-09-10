@@ -8,18 +8,6 @@ import type { UserRegisterInput, UserLoginInput, UserUpdateInput } from "../mode
 
 
 
-/**
- * @warning @Aziz018 i suppose not everyone uses kali, ... right?
- *          + i don't think it's a good idea to put this variable here
- *          i mean we should create a consts.ts file and have those
- *          variables exported out of it ... !
- *          we could export those
- *              - UPLOAD_DIR
- *              - DEFAULT_JWT_KEY
- *              - DEFAULT_CKE_KEY
- *          instead of "supersecret", ... or put this UPLOAD_DIR
- *          in the .env file ... ?!
- */
 const UPLOAD_DIR = "./public/images";
 
 export const userUploadHandler = async (request: FastifyRequest<{ Body: { description: string } }>, reply: FastifyReply) => {
@@ -131,7 +119,7 @@ export const userLoginController = async (
             rep.setCookie('access_token', token, {
                 path: '/',
                 httpOnly: true,
-                secure: true,
+                secure: true
             });
 
             rep.code(200).send({

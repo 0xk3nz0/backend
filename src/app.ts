@@ -9,10 +9,11 @@ import PreHandler from './hooks/pre.js'
 
 import UserRoutes from './routes/user.js';
 import FriendRoutes from './routes/friend.js';
+import AuthRoutes from './routes/auth.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
-import type {FastifyRequest} from "fastify";
+import { googleOAuthOpts } from "./auth/clients.js";
 
 
 
@@ -33,34 +34,43 @@ import type {FastifyRequest} from "fastify";
         });
 });
 
+const rateLimitingOpts = {
+    global: true,
+    max: 4,
+    timeWindow: 10 * 1000,
+    allowList: [],
+    addHeaders: true
+};
+
+const routes = [
+    {
+        pcb: UserRoutes,
+        opt: { prefix: '/v1/user' }
+    },
+    {
+        pcb: FriendRoutes,
+        opt: { prefix: '/v1/friend' }
+    },
+    {
+        pcb: AuthRoutes,
+        opt: { prefix: '/v1/auth' }
+    }
+]
+
+const hooks = {
+    'onClose': CloseHandler,
+    'onSend': SendHandler,
+    'preHandler': PreHandler,
+};
+
+const secrets = {
+    jwt: process.env.JWT_SECRET || 'supersecret',
+    cookie: process.env.CKE_SECRET || 'supersecret'
+};
+
 const app: Server = new Server(
-    '0.0.0.0', 3000,
-    {
-        global: true,
-        max: 4,
-        timeWindow: 10 * 1000,
-        allowList: [],
-        addHeaders: true
-    },
-    [
-        {
-            pcb: UserRoutes,
-            opt: { prefix: '/v1/user' }
-        },
-        {
-            pcb: FriendRoutes,
-            opt: { prefix: '/v1/friend' }
-        }
-    ],
-    {
-        'onClose': CloseHandler,
-        'onSend': SendHandler,
-        'preHandler': PreHandler,
-    },
-    {
-        jwt: process.env.JWT_SECRET || 'supersecret',
-        cookie: process.env.CKE_SECRET || 'supersecret'
-    },
+    '0.0.0.0', 3000, [ googleOAuthOpts ],
+    rateLimitingOpts, routes, hooks, secrets,
     [
         ServiceManagerPlugin,
         JWTAuthenticationPlugin
