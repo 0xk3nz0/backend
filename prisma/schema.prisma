@@ -50,10 +50,11 @@ model RoomMember {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  @@unique([userId, roomId])
 }
 
 model Message {
-  id          String    @id @default(uuid())
+  id          String @id @default(uuid())
   content     String
   senderId    String
   receiverId  String?

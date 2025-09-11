@@ -2,6 +2,7 @@ import ajvErrors from "ajv-errors";
 import { configDotenv } from "dotenv";
 import Fastify, { type FastifyInstance } from 'fastify';
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
+
 configDotenv();
 
 import jwt from '@fastify/jwt';
@@ -52,7 +53,8 @@ fastify.register(multipart, {
         fileSize: 10 * 1024 * 1024 // 10 MB
     }
 });
-fastify.register(websocket);
+
+await fastify.register(websocket);
 
 fastify.register(ServiceManagerPlugin);
 fastify.register(JWTAuthenticationPlugin);

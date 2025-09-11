@@ -106,5 +106,8 @@ export const createRoomSchema = {
                 }
             }
         }
-    }
+    },
+    // 400: {
+
+    // }
 }
