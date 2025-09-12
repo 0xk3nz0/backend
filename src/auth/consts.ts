@@ -12,3 +12,8 @@ export const googleOauthRedirectOpts: clientOauthOpts = {
     redirectPath: '/v1/auth/google',
     callbackUri: `${baseURL}/v1/auth/google/callback`,
 }
+
+export const facebookOauthRedirectOpts: clientOauthOpts = {
+    redirectPath: '/v1/auth/facebook',
+    callbackUri: `${baseURL}/v1/auth/facebook/callback`,
+}
