@@ -13,7 +13,7 @@ import AuthRoutes from './routes/auth.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
-import { googleOAuthOpts } from "./auth/clients.js";
+import {facebookOAuthOpts, googleOAuthOpts} from "./auth/clients.js";
 
 
 
@@ -69,7 +69,11 @@ const secrets = {
 };
 
 const app: Server = new Server(
-    '0.0.0.0', 3000, [ googleOAuthOpts ],
+    '0.0.0.0', 3000,
+    [
+        googleOAuthOpts,
+        facebookOAuthOpts
+    ],
     rateLimitingOpts, routes, hooks, secrets,
     [
         ServiceManagerPlugin,

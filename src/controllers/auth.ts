@@ -1,7 +1,17 @@
+/**
+ * @note The provider is currently hardcoded at this point [line:14 & line:25].
+ * @note A generic callbackController could be implemented to handle multiple providers dynamically,
+ *       which would reduce repetition and make adding new providers easier.
+ * @note This generic controller would typically use the OAuth "state" parameter to identify
+ *       which provider initiated the request, allowing one route to handle all provider callbacks.
+ * @note While more elegant in theory, this approach may introduce additional complexity
+ *       that could make onboarding new contributors (e.g., @Aziz018) less straightforward.
+ * @note Given that, keeping separate, simple callback controllers per provider
+ *       is a conscious choice for clarity, maintainability, and team collaboration.
+ */
+
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { OAuthUserInfo } from "../models/user.js";
-import { randomBytes } from 'crypto';
-import bcrypt from "bcrypt";
+import { authHelper } from "../utils/auth.js";
 
 
 
@@ -9,46 +19,20 @@ export const googleOAuthCallbackController = async (
     req: FastifyRequest, res: FastifyReply
 ): Promise<void> => {
 
-    const { token } = await req.server
-        .googleOAuth2
-        .getAccessTokenFromAuthorizationCodeFlow(req);
-    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-        headers: {
-            Authorization: `Bearer ${token.access_token}`
-        }
-    });
-    const user: OAuthUserInfo = await response.json();
-
-    let db_user = await req.server.service.user.fetchBy({ email: user.email });
-    if (!db_user) {
-        const rndPwd = await bcrypt
-            .hash(randomBytes(32).toString('hex'), 12);
-
-        await req.server.service.user.create({
-            name: user.name,
-            email: user.email,
-            password: rndPwd
-        });
-    }
-
-    db_user = await req.server.service.user.fetchBy({ email: user.email });
-    const payload = {
-        uid: db_user!.id,
-        createdAt: db_user!.createdAt
-    };
-
-    const jw_token = req.jwt.sign(payload, {
-        expiresIn: "1h"
-    });
-
-    res.setCookie('access_token', jw_token, {
-        path: '/',
-        httpOnly: true,
-        secure: true
-    });
-
+    const token = await authHelper(req, res, 'google');
     res.code(200).send({
-        access_token: jw_token
+        access_token: token
+    });
+
+}
+
+export const facebookOAuthCallbackController = async (
+    req: FastifyRequest, res: FastifyReply
+): Promise<void> => {
+
+    const token = await authHelper(req, res, 'facebook');
+    res.code(200).send({
+        access_token: token
     });
 
 }

@@ -24,7 +24,23 @@ declare module 'fastify' {
                 req: FastifyRequest,
                 res: FastifyReply
             ): string;
-        }
+        };
+        facebookOAuth2: {
+            getAccessTokenFromAuthorizationCodeFlow(
+                request: FastifyRequest
+            ): Promise<{
+                token: {
+                    access_token: string;
+                    refresh_token?: string;
+                    token_type: string;
+                    expires_in: number;
+                };
+            }>;
+            generateAuthorizationUri(
+                req: FastifyRequest,
+                res: FastifyReply
+            ): string;
+        };
     }
 
     interface FastifyRequest {

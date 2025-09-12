@@ -2,14 +2,32 @@ import type {
     FastifyInstance,
     FastifyPluginOptions
 } from "fastify";
-import { googleOAuthCallbackController } from "../controllers/auth.js";
+import {
+    facebookOAuthCallbackController,
+    googleOAuthCallbackController
+} from "../controllers/auth.js";
 
 
 
+/**
+ * Fastify plugin for OAuth callback routes.
+ *
+ * This module registers the callback endpoints for external OAuth providers.
+ * It handles the provider's response after the user authorizes the application.
+ * The handlers exchange authorization codes for access tokens and fetch user info.
+ *
+ * @param {FastifyInstance} fastify - The Fastify server instance.
+ * @param {FastifyPluginOptions} opts - Plugin options passed when registering this plugin.
+ * @returns {Promise<void>} Registers OAuth callback routes asynchronously.
+ */
 export default async (fastify: FastifyInstance, opts: FastifyPluginOptions) => {
 
     fastify.get('/google/callback', {
         handler: googleOAuthCallbackController
+    });
+
+    fastify.get('/facebook/callback', {
+       handler: facebookOAuthCallbackController
     });
 
 };
