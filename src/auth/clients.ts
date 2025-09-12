@@ -6,6 +6,17 @@ import {
 
 
 
+/**
+ * Google OAuth2 configuration for Fastify.
+ *
+ * @constant
+ * @type {FastifyOAuth2Options}
+ * @description
+ * Configuration object for Google OAuth2 authentication in Fastify.
+ * Includes client credentials, OAuth endpoints, redirect paths, and scopes.
+ *
+ * @see https://developers.google.com/identity/protocols/oauth2
+ */
 export const googleOAuthOpts: FastifyOAuth2Options = {
     name: 'googleOAuth2',
     credentials: {
@@ -25,6 +36,17 @@ export const googleOAuthOpts: FastifyOAuth2Options = {
     scope: [ 'profile', 'email' ]
 };
 
+/**
+ * Facebook OAuth2 configuration for Fastify.
+ *
+ * @constant
+ * @type {FastifyOAuth2Options}
+ * @description
+ * Configuration object for Facebook OAuth2 authentication in Fastify.
+ * Includes client credentials, OAuth endpoints, redirect paths, and scopes.
+ *
+ * @see https://developers.facebook.com/docs/facebook-login/manually-build-a-login-flow/
+ */
 export const facebookOAuthOpts: FastifyOAuth2Options = {
     name: 'facebookOAuth2',
     credentials: {

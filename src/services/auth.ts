@@ -11,8 +11,19 @@ import type { AuthServiceError_t } from "./user.js";
 
 
 
+/**
+ * Implementation of the Google OAuth provider.
+ * Handles token exchange and user info retrieval via Google's OAuth2 API.
+ */
 class GoogleOAuthProvider implements OAuthProvider {
 
+    /**
+     * Retrieves an access token from Google using the authorization code flow.
+     *
+     * @param {FastifyRequest} req - The incoming Fastify request containing OAuth state and code.
+     * @returns {Promise<Token>} Resolves to a token object with expiration and type details.
+     * @throws {Error} If token retrieval fails.
+     */
     async getAccessToken(req: FastifyRequest): Promise<Token> {
         const { token } = await req.server
             .googleOAuth2
@@ -24,6 +35,13 @@ class GoogleOAuthProvider implements OAuthProvider {
         };
     }
 
+    /**
+     * Fetches user profile information from Google APIs.
+     *
+     * @param {string} token - The OAuth2 access token.
+     * @returns {Promise<OAuthUserInfo>} Resolves with the user information object.
+     * @throws {Error} If fetching user info fails.
+     */
     async getUserInfo(token: string): Promise<OAuthUserInfo> {
         const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
             headers: {
@@ -35,8 +53,19 @@ class GoogleOAuthProvider implements OAuthProvider {
 
 };
 
+/**
+ * Implementation of the Facebook OAuth provider.
+ * Handles token exchange and user info retrieval via Facebook's OAuth2 API.
+ */
 class FacebookOAuthProvider implements OAuthProvider {
 
+    /**
+     * Retrieves an access token from Facebook using the authorization code flow.
+     *
+     * @param {FastifyRequest} req - The incoming Fastify request containing OAuth state and code.
+     * @returns {Promise<Token>} Resolves to a token object with expiration and type details.
+     * @throws {Error} If token retrieval fails.
+     */
     async getAccessToken(req: FastifyRequest): Promise<Token> {
         const { token } = await req.server
             .facebookOAuth2
@@ -48,6 +77,13 @@ class FacebookOAuthProvider implements OAuthProvider {
         };
     }
 
+    /**
+     * Fetches user profile information from Facebook Graph API.
+     *
+     * @param {string} token - The OAuth2 access token.
+     * @returns {Promise<OAuthUserInfo>} Resolves with the user information object.
+     * @throws {Error} If fetching user info fails.
+     */
     async getUserInfo(token: string): Promise<OAuthUserInfo> {
         const response = await fetch('https://graph.facebook.com/me?fields=id,name,email,picture', {
             headers: {
@@ -59,24 +95,48 @@ class FacebookOAuthProvider implements OAuthProvider {
 
 };
 
+/**
+ * Specialized error handler for the authentication service.
+ * Extends base `ServiceError` and registers error codes.
+ */
 class AuthServiceError extends ServiceError {
 
+    /**
+     * Constructs the authentication service error handler.
+     * Initializes error codes on creation.
+     */
     constructor() {
         super();
         this.setupCodes();
     }
 
+    /**
+     * Defines error codes specific to authentication.
+     * Extend this to map error identifiers to messages.
+     */
     setupCodes(): void {
         /// ... add codes later
     }
 
 };
 
+/**
+ * Authentication service managing OAuth providers, user verification,
+ * registration, and JWT-based authentication.
+ */
 export default class AuthService extends DataBaseWrapper {
 
+    /** Error handler instance for authentication-related failures. */
     errorHandler: AuthServiceError;
+
+    /** Available OAuth providers (Google, Facebook, etc.). */
     providers: Record<string, OAuthProvider>;
 
+    /**
+     * Initializes the authentication service with a Fastify instance.
+     *
+     * @param {FastifyInstance} fastify - The Fastify server instance.
+     */
     constructor(fastify: FastifyInstance) {
         super('auth.service', fastify);
         this.errorHandler = new AuthServiceError();
@@ -84,9 +144,15 @@ export default class AuthService extends DataBaseWrapper {
             google: new GoogleOAuthProvider(),
             facebook: new FacebookOAuthProvider(),
             /// ... add more providers
-        }
+        };
     }
 
+    /**
+     * Throws a typed authentication error if defined, otherwise a generic error.
+     *
+     * @param {ServiceError_t | undefined} err - The error object.
+     * @throws {AuthServiceError_t | Error} Typed error or generic error.
+     */
     throwErr(err: ServiceError_t | undefined) {
         if (err !== undefined) {
             const e: AuthServiceError_t = Object.assign(new Error(err.message), {
@@ -99,6 +165,13 @@ export default class AuthService extends DataBaseWrapper {
         }
     }
 
+    /**
+     * Checks if a user already exists in the database based on their email.
+     *
+     * @private
+     * @param {OAuthUserInfo} user_info - The user info object retrieved from an OAuth provider.
+     * @returns {Promise<boolean>} True if user exists, false otherwise.
+     */
     private async verify(user_info: OAuthUserInfo): Promise<boolean> {
         let user = await this.fastify.service.user.fetchBy({
             email: user_info.email
@@ -106,6 +179,14 @@ export default class AuthService extends DataBaseWrapper {
         return !!user;
     }
 
+    /**
+     * Registers a new user in the database using OAuth profile data.
+     * Generates a random password for the new account.
+     *
+     * @private
+     * @param {OAuthUserInfo} user_info - The user info object retrieved from an OAuth provider.
+     * @returns {Promise<void>} Resolves when the user is created.
+     */
     private async register(user_info: OAuthUserInfo): Promise<void> {
         const rndpwd = await bcrypt.hash(
             randomBytes(32).toString("hex"), 12
@@ -117,6 +198,14 @@ export default class AuthService extends DataBaseWrapper {
         })
     }
 
+    /**
+     * Authenticates a user by verifying existence, registering if new,
+     * and returning a signed JWT.
+     *
+     * @param {OAuthUserInfo} user_info - The user info object retrieved from an OAuth provider.
+     * @returns {Promise<string>} A signed JWT valid for one hour.
+     * @throws {Error} If verification, registration, or JWT signing fails.
+     */
     public async authenticate(user_info: OAuthUserInfo): Promise<string> {
         if (!(await this.verify(user_info))) {
             await this.register(user_info);

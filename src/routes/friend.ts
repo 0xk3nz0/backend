@@ -16,6 +16,19 @@ import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 
 
 
+/**
+ * Fastify plugin for friend request and friendship-related routes.
+ *
+ * This module registers all routes for managing friend requests and retrieving
+ * friends or pending requests. Routes can access services, middlewares, and
+ * request handlers via the Fastify instance and plugin options.
+ *
+ * All routes require JWT authentication, except for future public endpoints.
+ *
+ * @param {FastifyInstance} fastify - The Fastify server instance.
+ * @param {FastifyPluginOptions} options - Plugin options passed when registering this plugin.
+ * @returns {Promise<void>} Registers routes asynchronously.
+ */
 export default async (fastify: FastifyInstance, options: FastifyPluginOptions): Promise<void> => {
 
     fastify.post('/request', {
