@@ -50,6 +50,8 @@ model User {
   sentRequests     FriendRequest[] @relation("RequestSent")
   receivedRequests FriendRequest[] @relation("RequestReceived")
 
+  secret String?
+
   @@index([name, email])
 }
 

@@ -11,6 +11,7 @@ import type FriendRequest from "./friend.js";
 export type UserJWTPayload = {
     uid: string;
     createdAt: string;
+    mfa_required: boolean;
 }
 
 /**
@@ -93,4 +94,6 @@ export default interface UserModel {
 
     sentRequests?: FriendRequest[];
     receivedRequests?: FriendRequest[];
+
+    secret?: string | null;
 }

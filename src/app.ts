@@ -10,6 +10,7 @@ import PreHandler from './hooks/pre.js'
 import UserRoutes from './routes/user.js';
 import FriendRoutes from './routes/friend.js';
 import AuthRoutes from './routes/auth.js';
+import TOTPRoutes from './routes/totp.js';
 
 import ServiceManagerPlugin from './plugins/service.js';
 import JWTAuthenticationPlugin from './plugins/jwt.js';
@@ -43,6 +44,10 @@ const rateLimitingOpts = {
 };
 
 const routes = [
+    {
+        pcb: TOTPRoutes,
+        opt: { prefix: '/v1/totp' }
+    },
     {
         pcb: UserRoutes,
         opt: { prefix: '/v1/user' }

@@ -103,16 +103,50 @@ export const userLoginController = async (
         });
     } else {
         fastify.log.info(user);
-            fastify.log.info(`comparing ${req.body.password} with ${user.password}`);
         const isValid = await bcrypt.compare(req.body.password, user.password || "");
         fastify.log.info(isValid);
         if (isValid) {
-            const payload = {
-                uid: user.id,
-                createdAt: user.createdAt
-            };
 
-            const token = req.jwt.sign(payload, {
+            let token: string = '';
+            const user2faStatus = await fastify.service.totp.status(user.id!);
+            if (user2faStatus) {
+                token = req.jwt.sign({
+                    uid: user.id,
+                    createdAt: user.createdAt,
+                    mfa_required: true
+                }, {
+                    expiresIn: "5m"
+                });
+
+                rep.setCookie('access_token', token, {
+                    path: '/',
+                    httpOnly: true,
+                    secure: true
+                });
+
+                return rep.code(200).send({
+                    access_token: token,
+                    message: '2fa verification required, head to /v1/totp/verify'
+                });
+            }
+
+            /**
+             * @warning this is the new payload
+             *          in other word, the user attempts to login
+             *          we need to verify that he is enabled the 2FA
+             *          if he didn't we can safely continue from here
+             *          but if he did, we will have to give him another
+             *          short expiry payload with mfa_required set to true !
+             *          and redirect him to the verification route, ...
+             *          where he can verify him self and either blocked
+             *          or allowed to log-in in this case he will be offered
+             *          a JWT with mfa_required set to false !
+             */
+            token = req.jwt.sign({
+                uid: user.id,
+                createdAt: user.createdAt,
+                mfa_required: false
+            }, {
                 expiresIn: "1h"
             });
 

@@ -20,7 +20,7 @@ import {
  * @param {FastifyPluginOptions} opts - Plugin options passed when registering this plugin.
  * @returns {Promise<void>} Registers OAuth callback routes asynchronously.
  */
-export default async (fastify: FastifyInstance, opts: FastifyPluginOptions) => {
+export default async (fastify: FastifyInstance, opts: FastifyPluginOptions): Promise<void> => {
 
     fastify.get('/google/callback', {
         handler: googleOAuthCallbackController
