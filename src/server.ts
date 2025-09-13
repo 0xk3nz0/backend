@@ -8,6 +8,9 @@ import Fastify, {
     type FastifyReply,
     type FastifyRequest
 } from 'fastify';
+import fastifySwagger from '@fastify/swagger';
+import fastifySwaggerUi from '@fastify/swagger-ui';
+
 import type { ApplicationHook, LifecycleHook } from "fastify/types/hooks.js";
 
 import jwt from '@fastify/jwt';
@@ -65,6 +68,8 @@ export default class Server {
     secrets: ServerSecrets;
     plugins: (FastifyPluginCallback | FastifyPluginAsync)[];
     multipartFSize: number;
+    swaggerOpts: FastifyPluginOptions;
+    swaggerUIOpts: FastifyPluginOptions;
 
     constructor(
         host: string, port: number,
@@ -78,7 +83,7 @@ export default class Server {
         },
         plugins: (FastifyPluginCallback | FastifyPluginAsync)[] = [],
         multipartFSize: number = 10485760,
-        ) {
+    ) {
         this.host = host;
         this.port = port;
         this.oauth_clients = oauth_clients;
@@ -89,6 +94,28 @@ export default class Server {
         this.rateLimitOpts = rateLimitOptions;
         this.plugins = plugins;
         this.routes = routes;
+
+        this.swaggerOpts = {
+            openapi: {
+                info: {
+                    title: 'My API',
+                    description: 'API documentation',
+                    version: '1.0.0',
+                },
+                servers: [
+                    { url: 'http://localhost:3000' }
+                ],
+            },
+        };
+        this.swaggerUIOpts = {
+            routePrefix: '/docs',
+            uiConfig: {
+                docExpansion: 'full',
+                deepLinking: false,
+            },
+            staticCSP: true,
+            transformStaticCSP: (header: string): string => header,
+        };
     }
 
     private async connectPrismaClient(): Promise<void> {
@@ -105,6 +132,8 @@ export default class Server {
     }
 
     private async registerPlugs(): Promise<void> {
+        await this.fastify.register(fastifySwagger, this.swaggerOpts);
+        await this.fastify.register(fastifySwaggerUi, this.swaggerUIOpts);
         await this.fastify.register(jwt, { secret: this.secrets.jwt });
         await this.fastify.register(fcookie, { secret: this.secrets.cookie });
         await this.fastify.register(multipart, {

@@ -58,6 +58,8 @@
     "@fastify/multipart": "^9.2.1",
     "@fastify/oauth2": "^8.1.2",
     "@fastify/rate-limit": "^10.3.0",
+    "@fastify/swagger": "^9.5.1",
+    "@fastify/swagger-ui": "^5.2.3",
     "@rollup/rollup-darwin-x64": "^4.50.0",
     "@types/qrcode": "^1.5.5",
     "@types/speakeasy": "^2.0.10",

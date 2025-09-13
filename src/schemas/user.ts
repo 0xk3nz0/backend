@@ -1,4 +1,5 @@
 export const userRegisterSchema = {
+    tags: [ "users" ],
     body: {
         type: 'object',
         required: ['name', 'email', 'password'],
@@ -39,6 +40,7 @@ export const userRegisterSchema = {
 }
 
 export const userLoginSchema = {
+    tags: [ "users" ],
     body: {
         type: 'object',
         required: ['email', 'password'],
@@ -79,6 +81,7 @@ export const userLoginSchema = {
 };
 
 export const userProfileSchema = {
+    tags: [ "users" ],
     response: {
         200: {
             type: 'object',
@@ -99,6 +102,7 @@ export const userProfileSchema = {
 };
 
 export const userProfileUpdateSchema = {
+    tags: [ "users" ],
     body: {
         type: 'object',
         properties: {
@@ -125,6 +129,7 @@ export const userProfileUpdateSchema = {
 };
 
 export const userLogoutSchema = {
+    tags: [ "users" ],
     response: {
         200: {
             type: 'object',

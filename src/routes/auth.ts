@@ -23,11 +23,13 @@ import {
 export default async (fastify: FastifyInstance, opts: FastifyPluginOptions): Promise<void> => {
 
     fastify.get('/google/callback', {
+        schema: { tags: [ "oauth" ] },
         handler: googleOAuthCallbackController
     });
 
     fastify.get('/facebook/callback', {
-       handler: facebookOAuthCallbackController
+        schema: { tags: [ "oauth" ] },
+        handler: facebookOAuthCallbackController
     });
 
 };

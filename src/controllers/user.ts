@@ -147,7 +147,7 @@ export const userLoginController = async (
                 createdAt: user.createdAt,
                 mfa_required: false
             }, {
-                expiresIn: "1h"
+                expiresIn: "15m"
             });
 
             rep.setCookie('access_token', token, {

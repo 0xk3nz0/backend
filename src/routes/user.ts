@@ -36,6 +36,7 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
     });
 
     fastify.post('/avatar', {
+        schema: { tags: [ "users" ] },
         preHandler: [fastify.authentication_jwt],
         handler: userUploadHandler
     });
