@@ -10,6 +10,7 @@ import ServiceError, {type BaseServiceError_t, type ServiceError_t} from "../uti
 export type UserServiceError_t = BaseServiceError_t;
 export type FriendServiceError_t = BaseServiceError_t;
 export type AuthServiceError_t = BaseServiceError_t;
+export type TOTPServiceError_t = BaseServiceError_t;
 
 /**
  * UserServiceError
