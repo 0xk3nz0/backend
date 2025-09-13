@@ -1,6 +1,7 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
 import type { FastifyJWT } from "@fastify/jwt";
 import {prisma} from "../utils/prisma.js";
+import user from "../routes/user.js";
 
 
 
@@ -42,7 +43,31 @@ export const JWTAuthentication = async (
     }
 
     const decoded = req.jwt.verify<FastifyJWT['user']>(token);
+
+    /**
+     * @warning make sure the user is mfa_required set to false
+     * @note how can i make exceptions? like he can access verify
+     *       only and only if the mfa_required is set to true ??
+     */
+
+    if (req.url === '/v1/totp/verify') {
+        if (!decoded.mfa_required) {
+            return rep.code(401).send({
+                statusCode: 401,
+                error: 'Unauthorized!',
+                message: 'you are not supposed to be here, you are already verified!'
+            });
+        }
+    } else if (decoded.mfa_required) {
+        return rep.code(401).send({
+            statusCode: 401,
+            error: 'Unauthorized!',
+            message: 'you are not supposed to be here, you are not verified!'
+        });
+    }
+
     req.user = decoded;
+
 }
 
 
