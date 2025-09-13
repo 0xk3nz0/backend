@@ -30,7 +30,7 @@ class FriendServiceError extends ServiceError {
  * Responsibilities include sending, accepting, declining friend requests,
  * and fetching friends or pending requests.
  */
-export default class FriendService extends  DataBaseWrapper {
+export default class FriendService extends DataBaseWrapper {
 
     errorHandler: FriendServiceError;
 
