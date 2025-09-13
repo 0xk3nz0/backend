@@ -42,6 +42,7 @@ interface GetMessagePayload {
     roomId: string;
     limit?: number;
     offset?: number;
+    reset?: number
 }
 
 interface DirectMessagePayload {
@@ -57,7 +58,7 @@ interface TypingPayload {
     status: boolean;
 }
 
-type WSMessageType = 'join_room' | 'leave_room' | 'send_message' | 'get_messages' | 'send_direct_message' | 'typing';
+type WSMessageType = 'join_room' | 'leave_room' | 'send_message' | 'get_messages' | 'send_direct_message' | 'get_more_messages' | 'typing';
 
 interface WSMessage<T = any> {
     type: WSMessageType;
@@ -148,6 +149,16 @@ export const getMessageHandler = async (request: FastifyRequest, reply: FastifyR
     }
 };
 
+
+// Broadcast to all members in a room
+// const broadcastToRoom = () => {
+// }
+
+// Simulate the load more messages in a room
+const clientOffsets: Map<WebSocket, Map<string, number>> = new Map();
+
+
+
 // WebSocket Handler
 export const websocketHandler = async (connection: WS & { userData?: { userId: string; roomId: string } }, request: FastifyRequest) => {
     request.log.info('Client connected');
@@ -172,8 +183,19 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
         try {
             const validate = request.server.validatorCompiler({ schema });
             if (!validate(payload)) {
-                connection.send(JSON.stringify({ type: 'error', message: 'Payload validation failed' }));
-                return;
+            const errors = validate.errors?.map(e => ({
+                path: e.instancePath,
+                message: e.message, // will now include your custom errorMessage
+                keyword: e.keyword,
+                params: e.params
+            }));
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Payload validation failed',
+                details: errors
+            }));
+                // connection.send(JSON.stringify({ type: 'error', message: 'Payload validation failed' }));
+                // return;
             }
         } catch (error) {
             request.log.error({ error, type }, 'Schema validation error');
@@ -186,9 +208,10 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 case 'join_room': {
                     const { roomId, userId } = payload as JoinRoomPayload;
 
+                    /// @todo check if the user already joined
                     // Validate room and user
                     const [room, user] = await Promise.all([
-                        prisma.room.findUnique({ where: { id: roomId } }),
+                        prisma.room.findUnique({ where: { id: roomId }, include: { members: true } }),
                         prisma.user.findUnique({ where: { id: userId } }),
                     ]);
                     if (!room || !user) {
@@ -208,13 +231,22 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     liveConnections[roomId].add(connection);
                     connection.userData = { userId, roomId };
 
-                    connection.send(JSON.stringify({ type: 'joined', payload: { roomId } }));
+                    // connection.send(JSON.stringify({ type: 'joined', payload: { roomId } }));
+                    connection.send(JSON.stringify({ type: 'joined', payload: {
+                        roomId: room.id,
+                        roomName: room.name,
+                        type: room.type,
+                        members: room.members.map(m => ({ userId: m.userId, role: m.role })),
+                        joinedAt: new Date().toISOString()
+                        }
+                    }));
                     break;
                 }
 
                 case 'leave_room': {
                     const { roomId, userId } = payload as LeaveRoomPayload;
 
+                    /// @todo check if the user already left
                     // Validate room and user
                     const room = await prisma.room.findUnique({ where: { id: roomId } });
                     if (!room) {
@@ -226,7 +258,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     liveConnections[roomId]?.delete(connection);
                     connection.userData = undefined;
 
-                    connection.send(JSON.stringify({ type: 'left', payload: { roomId } }));
+                    connection.send(JSON.stringify({ type: 'left', payload: { roomId, userId } }));
                     break;
                 }
 
@@ -290,6 +322,41 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     break;
                 }
 
+                case 'get_more_messages': {
+                    const { roomId, limit = 10, reset = false } = payload as GetMessagePayload;
+
+                    // Initialize client tracking
+                    if (!clientOffsets.has(connection)) {
+                        clientOffsets.set(connection, new Map());
+                    }
+                    const roomOffsets = clientOffsets.get(connection)!;
+
+                    // Get last offset for this room, default to 0
+                    const offset = roomOffsets.get(roomId) ?? 0;
+                    
+                    // Validate room
+                    const room = await prisma.room.findUnique({ where: { id: roomId } });
+                    if (!room) {
+                        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+                    }
+
+                    // Fetch the next batch of messages
+                    const messages = await prisma.message.findMany({
+                        where: { roomId },
+                        include: { sender: true, receiver: true },
+                        orderBy: { createdAt: 'asc' },
+                        skip: offset,
+                        take: limit
+                    });
+
+                    // Update offset for next request
+                    roomOffsets.set(roomId, offset + (await messages).length);
+
+                    // Send messages to client
+                    connection.send(JSON.stringify({ type: 'more_messages', payload: messages }));
+                    break;
+                }
+
                 case 'send_direct_message': {
                     const { senderId, receiverId, text } = payload as DirectMessagePayload;
 
@@ -336,6 +403,8 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     connection.send(JSON.stringify({ type: 'direct_message_sent', payload: message }));
                     break;
                 }
+
+                /// @todo get members in a room
 
                 case 'typing': {
                     const { userId, status, roomId, receiverId } = payload as TypingPayload;

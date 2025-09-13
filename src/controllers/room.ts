@@ -67,12 +67,14 @@ export const createRoomHandler = async (request: FastifyRequest, reply: FastifyR
                 name: type === "GROUP" ? name : null, // group needs a name, direct doesn't
                 type: type ?? "GROUP", // default to GROUP
                 members: {
-                create: [
-                    {
-                        userId: creatorId,
-                        role: "ADMIN", // creator always admin
-                    },
-                    ...(members ?? []),
+                    create: [
+                        { userId: creatorId, role: 'ADMIN' }, // always add creator
+                        ...(members
+                        ?.filter((m) => m.userId !== creatorId) // remove duplicates
+                        .map((m) => ({
+                            userId: m.userId,
+                            role: type === 'DIRECT' ? 'MEMBER' : m.role ?? 'MEMBER',
+                        })) ?? []),
                     ],
                 },
             },
