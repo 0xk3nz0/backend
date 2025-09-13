@@ -60,7 +60,10 @@ export const getOTPAuthUrlController = async (
 }
 
 export const OTPVerificationController = async (req: FastifyRequest<{ Body: { mfa_code: string } }>, rep: FastifyReply) => {
-    const user: UserModel | null = await fastify.service.user.fetchBy({ 'id': req.user.uid });
+    const user: UserModel | null = await req.server
+        .service
+        .user
+        .fetchBy({ 'id': req.user.uid });
     const userSecret = await req.server
         .service
         .totp
