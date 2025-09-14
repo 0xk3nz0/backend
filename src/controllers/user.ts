@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { v4 as uuid } from "uuid";
 import bcrypt from "bcrypt";
 import { prisma } from "utils/prisma.js";
 import type UserModel from "../models/user.js";
@@ -150,14 +151,30 @@ export const userLoginController = async (
                 expiresIn: "15m"
             });
 
+            const refresh_token = uuid();
+            await prisma.refreshToken.create({
+                data: {
+                    userId: user.id!,
+                    token: refresh_token,
+                    expiredAt: new Date(Date.now() + 2592000000)
+                }
+            });
+
             rep.setCookie('access_token', token, {
                 path: '/',
                 httpOnly: true,
                 secure: true
             });
 
+            rep.setCookie('refresh_token', refresh_token, {
+                path: '/',
+                httpOnly: true,
+                secure: true
+            });
+
             rep.code(200).send({
-                access_token: token
+                access_token: token,
+                refresh_token
             });
         } else {
             rep.code(401).send({
@@ -252,4 +269,77 @@ export const userLogoutController = async (
             message: 'Invalid token'
         });
     }
+}
+
+export const userRefreshTokController = async (
+    req: FastifyRequest, rep: FastifyReply
+): Promise<void> => {
+
+    const refreshTokenCookie = req.cookies.refresh_token;
+
+    if (!refreshTokenCookie) {
+        return rep.code(400).send({
+            message: 'please provide a refresh token!'
+        });
+    }
+    const refreshToken = await prisma.refreshToken.findUnique({
+        where: {
+            token: refreshTokenCookie!
+        }
+    });
+
+    if (refreshToken) {
+        if (!refreshToken.isValid || refreshToken.expiredAt < new Date()) {
+            return rep.code(401).send({
+                message: 'refresh token is invalid!'
+            });
+        } else {
+            const user = await prisma.user.findUnique({
+                where: { id: refreshToken.userId }
+            });
+
+            await prisma.refreshToken.update({
+                where: { token: refreshTokenCookie! },
+                data: { isValid: false }
+            });
+
+            const token = req.jwt.sign({
+                uid: refreshToken.userId,
+                createdAt: user!.createdAt,
+                mfa_required: false
+            }, {
+                expiresIn: "30d"
+            });
+            const refresh_token = uuid();
+            await prisma.refreshToken.create({
+                data: {
+                    userId: refreshToken.userId,
+                    token: refresh_token,
+                    expiredAt: new Date(Date.now() + 2592000000)
+                }
+            });
+
+            rep.setCookie('access_token', token, {
+                path: '/',
+                httpOnly: true,
+                secure: true
+            });
+
+            rep.setCookie('refresh_token', refresh_token, {
+                path: '/',
+                httpOnly: true,
+                secure: true
+            });
+
+            rep.code(200).send({
+                access_token: token,
+                refresh_token
+            });
+        }
+    } else {
+        return rep.code(401).send({
+            message: 'refresh token not found!'
+        });
+    }
+
 }

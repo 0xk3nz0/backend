@@ -50,7 +50,8 @@ model User {
   sentRequests     FriendRequest[] @relation("RequestSent")
   receivedRequests FriendRequest[] @relation("RequestReceived")
 
-  secret String?
+  secret        String?
+  refreshTokens RefreshToken[]
 
   @@index([name, email])
 }
@@ -84,4 +85,14 @@ model BlacklistedToken {
   token     String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  isValid   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  expiredAt DateTime
 }
