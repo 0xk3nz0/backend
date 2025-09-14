@@ -20,8 +20,5 @@ export const chatRoom = (fastify: FastifyInstance, options: FastifyPluginOptions
         handler: getMessageHandler
     });
 
-    fastify.get('/ws', {
-        websocket: true,
-        handler: websocketHandler
-    });
+    fastify.get('/ws', { websocket: true }, websocketHandler);
 }

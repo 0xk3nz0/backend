@@ -1,9 +1,11 @@
 
 
 
+import { authenticateWebSocketToken } from 'middleware/websocket.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { wsSchema } from '../schemas/message.js';
 import { prisma } from '../utils/prisma.js';
+import { wsValidators } from '../app.js';
 import { WebSocket as WS } from 'ws';
 
 // Interfaces for payloads
@@ -180,6 +182,11 @@ const checkRateLimit = (connection: WS, maxRequests = 10, windowMs = 60000) => {
     return true;
 }
 
+// 
+function extractTokenFromHeaders(headers: any): string | null {
+    const auth = headers.authorization;
+    return auth?.startsWith('Bearer') ? auth.slice(7) : null;
+}
 
 // Simulate the load more messages in a room
 const clientOffsets: Map<WS, Map<string, number>> = new Map();
@@ -207,8 +214,30 @@ const clientOffsets: Map<WS, Map<string, number>> = new Map();
  * @param connection - The WebSocket connection object, extended with optional userData for tracking user and room.
  * @param request - The FastifyRequest object associated with the WebSocket upgrade.
  */
-export const websocketHandler = async (connection: WS & { userData?: { userId: string; roomId: string } }, request: FastifyRequest) => {
+export const websocketHandler = async (connection: WS & { userData?: { userId: string; roomId: string }, authenticatedUser: any }, request: FastifyRequest) => {
     request.log.info('Client connected');
+
+    //     ⚡ Common close codes
+    // Here are some you might use:
+    // - 1000 → Normal closure (everything is fine, connection ended cleanly).
+    // - 1001 → Going away (server shutdown, client leaving).
+    // - 1002 → Protocol error (malformed frame).
+    // - 1003 → Unsupported data (e.g., binary when only text expected).
+    // - 1008 → Policy violation (authentication failure, unauthorized action).
+    // - 1011 → Internal error (server couldn’t handle something).
+    const token = extractTokenFromHeaders(request.headers);
+    if (!token) {
+        connection.close(1008, 'No token provided');
+        return;
+    }
+    const authResult = await authenticateWebSocketToken(request.server, token);
+    if (!authResult.success) {
+        connection.close(1008, `Authentication failed: ${authResult.error}`);
+        return ;
+    }
+
+    // Store the authenticated user
+    connection.authenticatedUser = authResult.user;
 
     connection.on('message', async (rawMessage) => {
         let msg: WSMessage;
@@ -232,11 +261,14 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
         // Validate payload
         try {
-            if (!request.server.validatorCompiler) {
-                connection.send(JSON.stringify({ type: 'error', message: 'Validator not configured' }));
-                return;
+            const validate = wsValidators[type];
+            if (!validate) {
+                connection.send(JSON.stringify({
+                    type: 'error',
+                    message: `No validator found for type ${type}`
+                }));
+                return ;
             }
-            const validate = request.server.validatorCompiler({ schema: schema } as any);
             if (!validate(payload)) {
                 const errors = validate.errors?.map(e => ({
                     path: e.instancePath,        // JSON path where error occurred (e.g., "/roomId")
@@ -258,11 +290,28 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
         }
 
         try {
+
+            const authUser = connection.authenticatedUser;
+            if (!authUser || !authUser.id) {
+                connection.send(JSON.stringify({
+                    type: 'error',
+                    message: 'User not authenticated'
+                }));
+                return ;
+            }
+
             switch (type) {
                 case 'join_room': {
                     const { roomId, userId } = payload as JoinRoomPayload;
 
-                    /// @todo check if the user already joined
+                    if (authUser.id !== userId) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: User ID mismatch'
+                        }));
+                        return ;
+                    }
+
                     // Validate room and user
                     const [room, user] = await Promise.all([
                         prisma.room.findUnique({ where: { id: roomId }, include: { members: true } }),
@@ -300,7 +349,31 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 case 'leave_room': {
                     const { roomId, userId } = payload as LeaveRoomPayload;
 
-                    /// @todo check if the user already left
+                    if (authUser.id !== userId) {
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
+
+                    const roomMember = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!roomMember) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room, are u lost'
+                        }));
+                        return ;
+                    }
+
                     // Validate room and user
                     const room = await prisma.room.findUnique({ where: { id: roomId } });
                     if (!room) {
@@ -312,12 +385,41 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     liveConnections[roomId]?.delete(connection);
                     delete connection.userData;
 
+                    await prisma.roomMember.delete({
+                        where: { userId_roomId: { userId, roomId } }
+                    });
+
                     connection.send(JSON.stringify({ type: 'left', payload: { roomId, userId } }));
                     break;
                 }
 
                 case 'send_message': {
                     const { roomId, senderId, text } = payload as SendMessagePayload;
+
+                    if (authUser.id !== senderId) {
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: Cannot send message as another user' 
+                        }));
+                        return;
+                    }
+
+                    const roomMember = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!roomMember) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+                        return ;
+                    }
 
                     // Validate room and sender
                     const [room, sender] = await Promise.all([
@@ -357,6 +459,24 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 case 'get_messages': {
                     const { roomId, limit = 50, offset = 0 } = payload as GetMessagePayload;
 
+                    const roomMember = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!roomMember) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+
+                        return ;
+                    }
+
                     // Validate room
                     const room = await prisma.room.findUnique({ where: { id: roomId } });
                     if (!room) {
@@ -378,6 +498,24 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
                 case 'get_more_messages': {
                     const { roomId, limit = 10, reset = false } = payload as GetMessagePayload;
+
+                    const roomMember = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!roomMember) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+
+                        return ;
+                    }
 
                     // Initialize client tracking
                     if (!clientOffsets.has(connection)) {
@@ -414,6 +552,14 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
                 case 'send_direct_message': {
                     const { senderId, receiverId, text } = payload as DirectMessagePayload;
+
+                    if (authUser.id !== senderId) {
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: Cannot send message as another user' 
+                        }));
+                        return;
+                    }
 
                     // Validate sender and receiver
                     const [sender, receiver] = await Promise.all([
@@ -464,6 +610,14 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 case 'typing': {
                     const { userId, status, roomId, receiverId } = payload as TypingPayload;
 
+                    if (authUser.id !== userId) {
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
+
                     // Validate user
                     const user = await prisma.user.findUnique({ where: { id: userId } });
                     if (!user) {
@@ -477,6 +631,24 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         if (!room) {
                             connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
                             return;
+                        }
+
+                        const roomMember = await prisma.roomMember.findUnique({
+                            where: {
+                                userId_roomId: {
+                                    userId: authUser.id,
+                                    roomId
+                                }
+                            }
+                        });
+
+                        if (!roomMember) {
+                            connection.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Not a member of this room'
+                            }));
+
+                            return ;
                         }
 
                         // Broadcast typing status to room
