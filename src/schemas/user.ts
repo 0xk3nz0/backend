@@ -59,9 +59,13 @@ export const userLoginSchema = {
         200: {
             type: 'object',
             properties: {
-                uid: { type: 'string' },
-                message: { type: 'string' }
+                access_token: { type: 'string' },
+                refresh_token: { type: 'string' }
             }
+            // properties: {
+            //     uid: { type: 'string' },
+            //     message: { type: 'string' }
+            // }
         },
         404: {
             type: 'object',
