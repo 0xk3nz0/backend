@@ -1,9 +1,11 @@
-import ajvErrors from "ajv-errors";
-import { configDotenv } from "dotenv";
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
+import { config } from "dotenv";
+import addErrors from "ajv-errors";
+import addFormats from "ajv-formats";
+import Ajv2020 from "ajv/dist/2020.js";
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
 
-configDotenv();
+config();
 
 import jwt from '@fastify/jwt';
 import fcookie from '@fastify/cookie';
@@ -17,21 +19,55 @@ import SendHandler from './hooks/send.js'
 import CloseHandler from './hooks/close.js';
 
 import UserRoutes from './routes/user.js';
-import TestRoutes from './routes/test.js';
+// import TestRoutes from './routes/test.js';
 import { chatRoom } from './routes/message.js';
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 import ServiceManagerPlugin from './plugins/service.js';
+import { wsSchema } from 'schemas/message.js';
+import type Ajv from 'ajv';
 
-// Export fastify instance in devlopment
+// Export fastify instance in development
 export const fastify /*: FastifyInstance */ = Fastify({
-    logger: LoggingOpts,
-    ajv: {
-        customOptions: {
-            allErrors: true // ensures all validation errors are collected, not just the first
-        },
-        plugins: [ajvErrors] // enable ajv-errors
-    }
+    logger: LoggingOpts
+});
+
+const ajv = new Ajv2020({ allErrors: true });
+addErrors(ajv);
+addFormats(ajv);
+
+export const wsValidators: Record<string, Ajv.ValidateFunction> = {};
+for (const [type, schema] of Object.entries(wsSchema)) {
+  wsValidators[type] = ajv.compile(schema as object);
+}
+
+/**
+ * Configures a custom JSON schema validator using AJV 2020-12 with enhanced features.
+ * 
+ * This validator supports:
+ * - All validation errors collection (not just first error)
+ * - Custom error messages via ajv-errors plugin
+ * - Format validation (UUID, email, date, etc.) via ajv-formats plugin
+ * 
+ * @param {Object} options - Validator compiler options
+ * @param {Object} options.schema - JSON schema to compile
+ * @returns {Function} Compiled validation function
+ * 
+ * @example
+ * // Schema with custom error and UUID format
+ * const schema = {
+ *   type: "object",
+ *   properties: {
+ *     id: { type: "string", format: "uuid" },
+ *     email: { type: "string", format: "email", errorMessage: "Invalid email format" }
+ *   }
+ * };
+ */
+fastify.setValidatorCompiler(({ schema }) => {
+  const ajv = new (Ajv2020 as any)({ allErrors: true });
+  (addErrors as any)(ajv); // Apply ajv-errors to the Ajv instance
+  (addFormats as any)(ajv); // Apply ajv-formats to support uuid, email, etc.
+  return ajv.compile(schema);
 });
 
 await PrismaClientInstance.$connect();
@@ -61,7 +97,7 @@ fastify.register(JWTAuthenticationPlugin);
 
 fastify.register(chatRoom, { prefix: '/v1' });
 fastify.register(UserRoutes, { prefix: '/v1/user' });
-fastify.register(TestRoutes, { prefix: '/v1/user' });
+// fastify.register(TestRoutes, { prefix: '/v1/user' });
 
 
 [ 'SIGINT', 'SIGTERM' ]
@@ -72,7 +108,7 @@ fastify.register(TestRoutes, { prefix: '/v1/user' });
     });
 });
 
-// Healthcheck ROute
+// Healthcheck Route
 fastify.get('/', async (_, reply) => {
     reply.send({
         message: '200 ok'
