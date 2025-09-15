@@ -20,11 +20,11 @@ import CloseHandler from './hooks/close.js';
 
 import UserRoutes from './routes/user.js';
 // import TestRoutes from './routes/test.js';
-import { chatRoom } from './routes/message.js';
+import { chatRoom } from './routes/chat.js';
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 import ServiceManagerPlugin from './plugins/service.js';
-import { wsSchema } from 'schemas/message.js';
+import { wsSchema } from 'schemas/chat.js';
 import type Ajv from 'ajv';
 
 // Export fastify instance in development

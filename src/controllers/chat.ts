@@ -3,85 +3,25 @@
 
 import { authenticateWebSocketToken } from 'middleware/websocket.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { wsSchema } from '../schemas/message.js';
+import { wsSchema } from '../schemas/chat.js';
 import { prisma } from '../utils/prisma.js';
 import { wsValidators } from '../app.js';
 import { WebSocket as WS } from 'ws';
+import * as chatModel from '../models/chat.js'
 
-// Interfaces for payloads
-interface CreateMessageBody {
-    senderId: string;
-    content: string;
-    roomId?: string;
-    receiverId?: string;
-}
-
-interface GetMessageQuery {
-    roomId?: string;
-    senderId?: string;
-    receiverId?: string;
-    limit?: number;
-    offset?: number;
-}
-
-interface JoinRoomPayload {
-    roomId: string;
-    userId: string;
-}
-
-interface LeaveRoomPayload {
-    roomId: string;
-    userId: string;
-}
-
-interface SendMessagePayload {
-    roomId: string;
-    senderId: string;
-    text: string;
-}
-
-interface GetMessagePayload {
-    roomId: string;
-    limit?: number;
-    offset?: number;
-    reset?: number
-}
-
-interface DirectMessagePayload {
-    senderId: string;
-    receiverId: string;
-    text: string;
-}
-
-interface TypingPayload {
-    userId: string;
-    roomId?: string;
-    receiverId?: string;
-    status: boolean;
-}
-
-interface GetRoomMembersPayload {
-    roomId: string;
-}
-
-interface KickMemberPayload {
-    roomId: string;
-    targetUserId: string;
-}
-
-interface PromoteMemberPayload {
-    roomId: string;
-    targetUserId: string;
-    newRole: 'MEMBER' | 'ADMIN' | 'OWNER';
-}
-
-interface CreateRoomPayload {
-    name: string;
-    type?: 'DIRECT' | 'GROUP'; // | 'CHANNEL';
-    description?: string;
-}
-
-type WSMessageType = 'create_room' | 'join_room' | 'leave_room' | 'send_message' | 'get_messages' | 'send_direct_message' | 'get_more_messages' | 'get_room_members' | 'kick_member' | 'promote_member' | 'typing';
+type WSMessageType =
+    | 'join_room'
+    | 'leave_room'
+    | 'create_room'
+    | 'send_message'
+    | 'send_direct_message'
+    | 'get_messages'
+    | 'get_more_messages'
+    | 'get_room_members'
+    | 'promote_member'
+    | 'update_status'
+    | 'kick_member'
+    | 'typing';
 
 interface WSMessage<T = any> {
     type: WSMessageType;
@@ -94,7 +34,7 @@ const liveConnections: Record<string, Set<WS & { userData?: { userId: string; ro
 
 // HTTP Handlers
 export const createMessageHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { senderId, content, roomId, receiverId } = request.body as CreateMessageBody;
+    const { senderId, content, roomId, receiverId } = request.body as chatModel.CreateMessageBody;
 
     // Validate sender
     const sender = await prisma.user.findUnique({ where: { id: senderId } });
@@ -136,7 +76,7 @@ export const createMessageHandler = async (request: FastifyRequest, reply: Fasti
 };
 
 export const getMessageHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    const { roomId, senderId, receiverId, limit = 50, offset = 0 } = request.query as GetMessageQuery;
+    const { roomId, senderId, receiverId, limit = 50, offset = 0 } = request.query as chatModel.GetMessageQuery;
 
     if (!roomId && !(senderId && receiverId)) {
         return reply.code(400).send({ error: 'Provide either a roomId or both senderId and receiverId' });
@@ -239,7 +179,7 @@ const clientOffsets: Map<WS, Map<string, number>> = new Map();
 export const websocketHandler = async (connection: WS & { userData?: { userId: string; roomId: string }, authenticatedUser: any }, request: FastifyRequest) => {
     request.log.info('Client connected');
 
-    //     ⚡ Common close codes
+    // ⚡ Common close codes
     // Here are some you might use:
     // - 1000 → Normal closure (everything is fine, connection ended cleanly).
     // - 1001 → Going away (server shutdown, client leaving).
@@ -324,7 +264,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
             switch (type) {
                 case 'create_room': {
-                    const { name, type = 'GROUP', description } = payload as CreateRoomPayload;
+                    const { name, type = 'GROUP', description } = payload as chatModel.CreateRoomPayload;
 
                     // Validate room name
                     if (!name || name.trim().length === 0) {
@@ -404,7 +344,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'join_room': {
-                    const { roomId, userId } = payload as JoinRoomPayload;
+                    const { roomId, userId } = payload as chatModel.JoinRoomPayload;
 
                     if (authUser.id !== userId) {
                         connection.send(JSON.stringify({
@@ -449,7 +389,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'leave_room': {
-                    const { roomId, userId } = payload as LeaveRoomPayload;
+                    const { roomId, userId } = payload as chatModel.LeaveRoomPayload;
 
                     if (authUser.id !== userId) {
                         connection.send(JSON.stringify({ 
@@ -496,7 +436,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'get_room_members': {
-                    const { roomId } = payload as GetRoomMembersPayload;
+                    const { roomId } = payload as chatModel.GetRoomMembersPayload;
 
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
@@ -545,7 +485,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'kick_member': {
-                    const { roomId, targetUserId } = payload as KickMemberPayload;
+                    const { roomId, targetUserId } = payload as chatModel.KickMemberPayload;
 
                     // Check if user is admin/owner of this room
                     const userMembership = await prisma.roomMember.findUnique({
@@ -661,7 +601,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'promote_member': {
-                    const { roomId, targetUserId, newRole } = payload as PromoteMemberPayload;
+                    const { roomId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
 
                     // Validate new role
                     const validRoles = ['MEMBER', 'ADMIN', 'OWNER'];
@@ -792,7 +732,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'send_message': {
-                    const { roomId, senderId, text } = payload as SendMessagePayload;
+                    const { roomId, senderId, text } = payload as chatModel.SendMessagePayload;
 
                     if (authUser.id !== senderId) {
                         connection.send(JSON.stringify({ 
@@ -855,7 +795,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'get_messages': {
-                    const { roomId, limit = 50, offset = 0 } = payload as GetMessagePayload;
+                    const { roomId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
 
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
@@ -895,7 +835,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'get_more_messages': {
-                    const { roomId, limit = 10, reset = false } = payload as GetMessagePayload;
+                    const { roomId, limit = 10, reset = false } = payload as chatModel.GetMessagePayload;
 
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
@@ -949,7 +889,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'send_direct_message': {
-                    const { senderId, receiverId, text } = payload as DirectMessagePayload;
+                    const { senderId, receiverId, text } = payload as chatModel.DirectMessagePayload;
 
                     if (authUser.id !== senderId) {
                         connection.send(JSON.stringify({ 
@@ -1006,7 +946,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 /// @todo get members in a room
 
                 case 'typing': {
-                    const { userId, status, roomId, receiverId } = payload as TypingPayload;
+                    const { userId, status, roomId, receiverId } = payload as chatModel.TypingPayload;
 
                     if (authUser.id !== userId) {
                         connection.send(JSON.stringify({ 

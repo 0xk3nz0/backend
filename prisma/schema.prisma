@@ -23,6 +23,9 @@ model User {
   updatedAt DateTime @updatedAt
   avatar    String   @default("../public/images/default-avatar.jpg")
 
+  status        UserStatus @default(OFFLINE)
+  lastSeen      DateTime   @default(now())
+
   sentMessages      Message[] @relation("MessageSender")
   receivedMessages  Message[] @relation("MessageReceiver")
   roomMembers       RoomMember[]
@@ -76,4 +79,11 @@ enum MemberRole {
   OWNER
   ADMIN
   MEMBER
+}
+
+enum UserStatus {
+  IN_GAME
+  OFFLINE
+  ONLINE
+  BUSY
 }

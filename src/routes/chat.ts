@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyPluginOptions, FastifyRequest } from "fastify";
 import { createRoomSchema } from "../schemas/room.js"
 import { createRoomHandler } from "../controllers/room.js"
-import { createMessageSchema, getMessageSchema } from "../schemas/message.js"
-import { websocketHandler, createMessageHandler, getMessageHandler } from "../controllers/message.js"
+import { createMessageSchema, getMessageSchema } from "../schemas/chat.js"
+import { websocketHandler, createMessageHandler, getMessageHandler } from "../controllers/chat.js"
 
 export const chatRoom = (fastify: FastifyInstance, options: FastifyPluginOptions) => {
     fastify.post('/rooms', {
