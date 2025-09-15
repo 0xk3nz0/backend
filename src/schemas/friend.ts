@@ -79,3 +79,35 @@ export const getIncomingRequestsSchema = {
         }
     }
 };
+
+export const blockUserSchema = {
+    tags: [ "friends" ],
+    body: {
+        type: 'object',
+        required: ['blocked_uid'],
+        properties: {
+            blocked_uid: { type: 'string' }
+        }
+    }
+}
+
+export const unblockUserSchema = {
+    tags: [ "friends" ],
+    body: {
+        type: 'object',
+        required: ['blocked_uid'],
+        properties: {
+            blocked_uid: { type: 'string' }
+        }
+    }
+}
+
+export const getBlockedUsersSchema = {
+    tags: [ "friends" ],
+    response: {
+        200: {
+            type: 'array',
+            items: { type: 'string' }
+        }
+    }
+}

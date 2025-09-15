@@ -120,6 +120,22 @@ export default class FriendService extends DataBaseWrapper {
                     message: 'there\'s already a pending request'
                 });
             } else {
+                const blocks = await this.prisma.blockedUser.findFirst({
+                    where: {
+                        OR: [
+                            { blockerId: sender_uid, blockedId: receiver_uid },
+                            { blockerId: receiver_uid, blockedId: sender_uid }
+                        ]
+                    }
+                });
+
+                if (blocks) {
+                    this.throwErr({
+                        code: 403,
+                        message: 'cannot send friend request; user is blocked!'
+                    });
+                }
+
                 return await this.craftRequest(sender_uid, receiver_uid);
             }
         }
@@ -274,5 +290,127 @@ export default class FriendService extends DataBaseWrapper {
             }
         }
     }
+    
+    /**
+     * Blocks a user, preventing them from sending friend requests
+     * and removing existing friendship if present.
+     * 
+     * @param blockerId - ID of the user doing the blocking
+     * @param blockedId - ID of the user being blocked
+     * @throws Error if users don't exist or already blocked
+     */
+    public async blockUser(blockerId: string, blockedId: string): Promise<void> {
+        try {
+            const [ blocker, blocked ] = await Promise.all([
+                this.fastify.service.user.fetchBy({ id: blockerId }),
+                this.fastify.service.user.fetchBy({ id: blockedId })
+            ]);
 
+            if (!blocker || !blocked) {
+                this.throwErr({
+                    code: 404,
+                    message: 'user not found!'
+                });
+            }
+
+            const existingBlock = await this.prisma.blockedUser.findFirst({
+                where: {
+                    blockerId,
+                    blockedId
+                }
+            });
+
+            if (existingBlock) {
+                this.throwErr({
+                    code: 409,
+                    message: 'user is already blocked'
+                });
+            }
+
+            await this.prisma.friendRequest.deleteMany({
+                where: {
+                    OR: [
+                        {requesterId: blockerId, requestedId: blockedId},
+                        {requesterId: blockedId, requestedId: blockerId}
+                    ]
+                }
+            });
+
+            await this.prisma.blockedUser.create({
+                data: {
+                    blockerId,
+                    blockedId
+                }
+            });
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error
+            );
+            if (err === undefined) {
+                throw Error("Unknown error!");
+            } else {
+                throw this.throwErr(err);
+            }
+        }
+    }
+
+    /**
+     * Unblocks a previously blocked user.
+     * 
+     * @param blockerId - ID of the user who blocked
+     * @param blockedId - ID of the blocked user
+     * @throws Error if block record doesn't exist
+     */
+    public async unblockUser(blockerId: string, blockedId: string): Promise<void> {
+        try {
+            const block = await this.prisma.blockedUser.findFirst({
+                where: {
+                    blockerId,
+                    blockedId
+                }
+            });
+
+            if (!block) {
+                this.throwErr({
+                    code: 404,
+                    message: 'user is not blocked!'
+                });
+            }
+
+            await this.prisma.blockedUser.delete({
+                where: {
+                    id: block!.id
+                }
+            });
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error
+            );
+            if (err === undefined) {
+                throw Error("Unknown error!");
+            } else {
+                throw this.throwErr(err);
+            }
+        }
+    }
+
+    public async getBlockedUsers(userId: string): Promise<string[]> {
+        try {
+            const blocks = await this.prisma.blockedUser.findMany({
+                where: {
+                    blockerId: userId
+                }
+            });
+            return blocks.map(block => block.blockedId);
+        } catch (error: any) {
+            let err = this.errorHandler.handleError(
+                this.fastify, this.service, error
+            );
+            if (err === undefined) {
+                throw Error("Unknown error!");
+            } else {
+                throw this.throwErr(err);
+            }
+        }
+    }
 }
