@@ -215,7 +215,8 @@ export default class AuthService extends DataBaseWrapper {
         });
         return this.fastify.jwt.sign({
             uid: user!.id,
-            createdAt: user!.createdAt
+            createdAt: user!.createdAt,
+            mfa_required: false
         }, {
             expiresIn: "1h"
         });

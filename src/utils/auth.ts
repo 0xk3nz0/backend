@@ -2,6 +2,8 @@ import type {FastifyReply, FastifyRequest} from "fastify";
 
 import type AuthService from "../services/auth.js";
 import type OAuthProvider from "../models/auth.js";
+import type { OAuthUserInfo } from "models/user.js";
+import { prisma } from "./prisma.js";
 
 
 
@@ -33,6 +35,7 @@ export const authHelper = async (
     req: FastifyRequest, res: FastifyReply, provider: string
 ): Promise<string> => {
 
+    let token = '';
     const authService: AuthService = req.server.service.auth;
     const oauthProvider: OAuthProvider | undefined = authService.providers[provider];
 
@@ -43,8 +46,46 @@ export const authHelper = async (
         });
     }
     const { access_token } = await oauthProvider!.getAccessToken(req);
-    const user_info = await oauthProvider!.getUserInfo(access_token);
-    const token = await authService.authenticate(user_info);
+    const user_info: OAuthUserInfo = await oauthProvider!.getUserInfo(access_token);
+    
+    const user = await prisma.user.findUnique({
+        where: { email: user_info.email }
+    });
+    if (!user) {
+        req.server
+            .service
+            .user.throwErr({
+                code: 404,
+                message: 'user doesn\'t exist'
+            });
+    }
+    const user2faStatus = await req
+        .server
+        .service
+        .totp
+        .status(user!.id!);
+    if (user2faStatus) {
+        token = req.jwt.sign({
+            uid: user!.id!,
+            createdAt: user!.createdAt!,
+            mfa_required: true
+        }, {
+            expiresIn: "5m"
+        });
+
+        res.setCookie('access_token', token, {
+            path: '/',
+            httpOnly: true,
+            secure: true
+        });
+        
+        return res.code(200).send({
+            access_token: token,
+            message: '2fa verification required, head to /v1/totp/verify'
+        });
+    }
+    
+    token = await authService.authenticate(user_info);
 
     res.setCookie('access_token', token, {
         path: '/',
