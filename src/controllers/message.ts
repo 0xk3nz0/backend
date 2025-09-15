@@ -60,12 +60,34 @@ interface TypingPayload {
     status: boolean;
 }
 
-type WSMessageType = 'join_room' | 'leave_room' | 'send_message' | 'get_messages' | 'send_direct_message' | 'get_more_messages' | 'typing';
+interface GetRoomMembersPayload {
+    roomId: string;
+}
+
+interface KickMemberPayload {
+    roomId: string;
+    targetUserId: string;
+}
+
+interface PromoteMemberPayload {
+    roomId: string;
+    targetUserId: string;
+    newRole: 'MEMBER' | 'ADMIN' | 'OWNER';
+}
+
+interface CreateRoomPayload {
+    name: string;
+    type?: 'DIRECT' | 'GROUP'; // | 'CHANNEL';
+    description?: string;
+}
+
+type WSMessageType = 'create_room' | 'join_room' | 'leave_room' | 'send_message' | 'get_messages' | 'send_direct_message' | 'get_more_messages' | 'get_room_members' | 'kick_member' | 'promote_member' | 'typing';
 
 interface WSMessage<T = any> {
     type: WSMessageType;
     payload: T;
 }
+
 
 // Store live connections per room
 const liveConnections: Record<string, Set<WS & { userData?: { userId: string; roomId: string } }>> = {};
@@ -301,6 +323,86 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
             }
 
             switch (type) {
+                case 'create_room': {
+                    const { name, type = 'GROUP', description } = payload as CreateRoomPayload;
+
+                    // Validate room name
+                    if (!name || name.trim().length === 0) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Room name is required'
+                        }));
+                        return ;
+                    }
+
+                    if (name.length > 100) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Room name must be less than 100 characters'
+                        }));
+                        return ;
+                    }
+
+                    const validTypes = ['DIRECT', 'GROUP']; // 'CHANNEL'
+                    if (!validTypes.includes(type)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Invalid room type, Valid types: DIRECT, GROUP'
+                        }));
+                        return ;
+                    }
+
+                    try {
+                        // Create the room
+                        const newRoom = await prisma.room.create({
+                            data: {
+                                name: name.trim(),
+                                type,
+                                // createdBy: authUser.id
+                                // description: description?.trim() || null,
+                            }
+                        });
+
+                        // Add creator as OWNER
+                        await prisma.roomMember.create({
+                            data: {
+                                userId: authUser.id,
+                                roomId: newRoom.id,
+                                role: 'OWNER'
+                            }
+                        });
+
+                        // Initialize live connections for this room
+                        liveConnections[newRoom.id] = new Set();
+                        liveConnections[newRoom.id]?.add(connection);
+                        connection.userData = { userId: authUser.id, roomId: newRoom.id };
+
+                        // Send success response
+                        connection.send(JSON.stringify({
+                            type: 'room_created',
+                            payload: {
+                                room: {
+                                    id: newRoom.id,
+                                    name: newRoom.name,
+                                    type: newRoom.type,
+                                    // description: newRoom.description,
+                                    createdAt: newRoom.createdAt,
+                                    createdBy: authUser.id
+                                },
+                                userRole: 'OWNER'
+                            }
+                        }));
+
+                    } catch(error) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to create room'
+                        }));
+                    }
+
+                    break;
+                }
+
                 case 'join_room': {
                     const { roomId, userId } = payload as JoinRoomPayload;
 
@@ -390,6 +492,302 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     });
 
                     connection.send(JSON.stringify({ type: 'left', payload: { roomId, userId } }));
+                    break;
+                }
+
+                case 'get_room_members': {
+                    const { roomId } = payload as GetRoomMembersPayload;
+
+                    const roomMember = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!roomMember) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+                        return ;
+                    }
+                    const members = await prisma.roomMember.findMany({
+                        where: {
+                            roomId
+                        },
+                        include: {
+                            user: {
+                                select: {
+                                    id: true,
+                                    name: true,
+                                    email: true
+                                }
+                            }
+                        }
+                    });
+
+                    connection.send(JSON.stringify({
+                        type: 'room_members',
+                        payload: {
+                            roomId,
+                            members: members.map(m => ({
+                                userId: m.userId,
+                                role: m.role,
+                                joinedAt: m.joinedAt,
+                                user: m.user
+                            }))
+                        }
+                    }));
+                    break;
+                }
+
+                case 'kick_member': {
+                    const { roomId, targetUserId } = payload as KickMemberPayload;
+
+                    // Check if user is admin/owner of this room
+                    const userMembership = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!userMembership) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+                        return ;
+                    }
+
+                    if (userMembership.role !== 'ADMIN') { // && userMembership.role !== 'OWNER') {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Insufficient permissions: Only admins can kick members'
+                        }));
+                        return ;
+                    }
+
+                    // Can't kick yourself
+                    if (authUser.id === targetUserId) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Connot kick yourself, are u crazy!'
+                        }));
+                        return ;
+                    }
+
+                    // Check if the target user in the room
+                    const targetMembership = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: targetUserId,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!targetMembership) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Target is not a member of this room'
+                        }));
+                        return ;
+                    }
+
+                    // Can't kick owner (unless you're owner)
+                    if (targetMembership.role === 'OWNER' && userMembership.role !== 'OWNER') {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Cannot kick room owner'
+                        }));
+                        return ;
+                    }
+
+                    await prisma.roomMember.delete({
+                        where: {
+                            userId_roomId: {
+                                userId: targetUserId,
+                                roomId
+                            }
+                        }
+                    });
+
+                    // Disconnect the kicked user's websocket connections
+                    liveConnections[roomId]?.forEach((ws) => {
+                        if (ws.userData?.userId === targetUserId) {
+                            ws.send(JSON.stringify({
+                                type: 'kicked from room',
+                                payload: {
+                                    roomId,
+                                    kickedBy: authUser.id,
+                                    reason: 'You have been removed from this room'
+                                }
+                            }));
+                            liveConnections[roomId]?.delete(ws);
+                            delete ws.userData;
+                        }
+                    });
+
+                    // Notify all room members
+                    liveConnections[roomId]?.forEach((ws) => {
+                        if (ws.readyState === WS.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'member_kicked',
+                                payload: {
+                                    roomId,
+                                    kickedUserId: targetUserId,
+                                    kickedBy: authUser.id
+                                }
+                            }));
+                        }
+                    });
+
+                    // Confirm to admin
+                    connection.send(JSON.stringify({
+                        type: 'member_kicked_success',
+                        payload: {
+                            roomId,
+                            kickedUserId: targetUserId
+                        }
+                    }));
+
+                    break;
+                }
+
+                case 'promote_member': {
+                    const { roomId, targetUserId, newRole } = payload as PromoteMemberPayload;
+
+                    // Validate new role
+                    const validRoles = ['MEMBER', 'ADMIN', 'OWNER'];
+                    if(!validRoles.includes(newRole)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Invalid role. valid roles MEMBER, ADMIN, OWNER'
+                        }));
+                        return ;
+                    }
+
+                    const userMembership = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!userMembership) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+                        return ;
+                    }
+                    
+                    if (userMembership.role !== 'ADMIN' || userMembership.role !== 'OWNER') {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Insufficient permissions: Only admins can promote members'
+                        }));
+                        return ;
+                    }
+
+                    // Check if target user is in the room
+                    const targetMembership = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: targetUserId,
+                                roomId
+                            }
+                        }
+                    });
+
+                    if (!targetMembership) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'User is not a member of this room'
+                        }));
+                        return ;
+                    }
+                    
+                    // Only OWNER can promote to OWNER or demote from OWNER
+                    if ((newRole === 'OWNER' || targetMembership.role === 'OWNER') && userMembership.role !== 'OWNER') {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Only room owner can change owner status'
+                        }));
+                        return ;
+                    }
+
+                    // Can't change ur own role
+                    if (authUser.id === targetUserId) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Cannot change your own role'
+                        }));
+                        return ;
+                    }
+
+                    // Special case: If promoting to OWNER, demote cureent owner to ADMIN
+                    if (newRole === 'OWNER') {
+                        await prisma.roomMember.update({
+                            where: {
+                                userId_roomId: {
+                                    userId: authUser.id,
+                                    roomId
+                                }
+                            },
+                            data: {
+                                role: 'ADMIN'
+                            }
+                        });
+                    }
+
+                    // Update the target user's role
+                    const updatedMember = await prisma.roomMember.update({
+                        where: {
+                            userId_roomId: {
+                                userId: targetUserId,
+                                roomId
+                            }
+                        },
+                        data: {
+                            role: newRole
+                        }
+                    });
+
+                    // Notify all room members
+                    liveConnections[roomId]?.forEach((ws) => {
+                        if (ws.readyState === WS.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'member_role_changed',
+                                payload: {
+                                    roomId,
+                                    userId: targetUserId,
+                                    newRole,
+                                    changedBy: authUser.id
+                                }
+                            }));
+                        }
+                    });
+
+                    // Confirm to admin
+                    connection.send(JSON.stringify({
+                        type: 'member_role_changed',
+                        payload: {
+                            roomId,
+                            userId: targetUserId,
+                            newRole,
+                            oldRole: targetMembership.role
+                        }
+                    }));
+
                     break;
                 }
 

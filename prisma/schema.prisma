@@ -73,6 +73,7 @@ enum RoomType {
 }
 
 enum MemberRole {
+  OWNER
   ADMIN
   MEMBER
 }

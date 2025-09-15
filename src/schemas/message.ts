@@ -191,6 +191,16 @@ export const wsSchema = {
         },
         additionalProperties: false,
     },
+    get_room_members: {
+        type: 'object',
+    }, kick_member: {
+        type: 'object',
+    } ,promote_member: {
+        type: 'object',
+    },
+    create_room: {
+        type: 'object',
+    },
     typing: {
         type: 'object',
         required: ['userId', 'status'],
