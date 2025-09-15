@@ -103,9 +103,7 @@ export const userLoginController = async (
             message: 'not found!'
         });
     } else {
-        fastify.log.info(user);
-        const isValid = await bcrypt.compare(req.body.password, user.password || "");
-        fastify.log.info(isValid);
+        const isValid = await bcrypt.compare(req.body.password, user.password!);
         if (isValid) {
 
             let token: string = '';
@@ -260,7 +258,7 @@ export const userLogoutController = async (
         }
         rep.clearCookie('access_token', { path: '/' });
         rep.code(200).send({
-            message: 'logger-out successfully!'
+            message: 'logged-out successfully!'
         });
     } catch (error) {
         rep.code(400).send({
