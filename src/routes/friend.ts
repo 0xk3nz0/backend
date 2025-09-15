@@ -1,18 +1,27 @@
 import {
+    blockUserController,
+    getBlockedUsersController,
     getFriendsController,
     getIncomingRequestsController,
     getPendingRequestsController,
     resolveFriendRequestController,
-    sendFriendRequestController
+    sendFriendRequestController,
+    unblockUserController
 } from "../controllers/friend.js";
 import {
+    blockUserSchema,
+    getBlockedUsersSchema,
     getFriendsSchema,
     getIncomingRequestsSchema,
     getPendingRequestsSchema,
     resolveFriendRequestSchema,
-    sendFriendRequestSchema
+    sendFriendRequestSchema,
+    unblockUserSchema
 } from "../schemas/friend.js";
-import type { FastifyInstance, FastifyPluginOptions } from "fastify";
+import type {
+    FastifyInstance,
+    FastifyPluginOptions
+} from "fastify";
 
 
 
@@ -59,6 +68,24 @@ export default async (fastify: FastifyInstance, options: FastifyPluginOptions): 
         schema: getIncomingRequestsSchema,
         handler: getIncomingRequestsController,
         preHandler: [fastify.authentication_jwt]
+    });
+
+    fastify.post('/block', {
+        schema: blockUserSchema,
+        handler: blockUserController,
+        preHandler: [fastify.authentication_jwt] 
+    });
+
+    fastify.post('/unblock', {
+        schema: unblockUserSchema,
+        handler: unblockUserController,
+        preHandler: [fastify.authentication_jwt] 
+    });
+
+    fastify.get('/blocked', {
+        schema: getBlockedUsersSchema,
+        handler: getBlockedUsersController,
+        preHandler: [fastify.authentication_jwt] 
     });
 
 };

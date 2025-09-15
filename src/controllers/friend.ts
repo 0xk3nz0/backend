@@ -1,6 +1,6 @@
 import type FriendRequest from "../models/friend.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { SendFriendRequestInput } from "../models/friend.js";
+import type { BlockUserInput, SendFriendRequestInput } from "../models/friend.js";
 import type { ResolveFriendRequestInput } from "../models/friend.js";
 import type FriendService from "../services/friend.js";
 import { isServiceError } from "../utils/service-error.js";
@@ -89,4 +89,56 @@ export const getIncomingRequestsController = async (
         .map((freq) => freq.id)
         .filter((fid) => fid !== undefined);
     res.code(200).send(incomingFriendIds);
+}
+
+export const blockUserController = async (
+    req: FastifyRequest<{ Body: BlockUserInput }>, rep: FastifyReply
+): Promise<void> => {
+    try {
+        await req.server.service.friend.blockUser(
+            req.user.uid,
+            req.body.blocked_uid
+        );
+        rep.code(200).send({
+            message: 'user blocked successfully'
+        });
+    } catch (e: unknown) {
+        if (isServiceError(e)) {
+            rep.code(e.code).send({
+                message: e.message
+            });
+        } else {
+            throw e;
+        }
+    }
+}
+
+export const unblockUserController = async (
+    req: FastifyRequest<{ Body: BlockUserInput }>, rep: FastifyReply
+): Promise<void> => {
+    try {
+        await req.server.service.friend.unblockUser(
+            req.user.uid,
+            req.body.blocked_uid
+        );
+        rep.code(200).send({
+            message: 'user unblocked successfully'
+        });
+    } catch (e: unknown) {
+        if (isServiceError(e)) {
+            rep.code(e.code).send({
+                message: e.message
+            });
+        } else {
+            throw e;
+        }
+    }
+}
+
+export const getBlockedUsersController = async (
+    req: FastifyRequest,
+    rep :FastifyReply
+): Promise<void> => {
+    const blockedUsers = await req.server.service.friend.getBlockedUsers(req.user.uid);
+    rep.code(200).send(blockedUsers);
 }

@@ -50,6 +50,9 @@ model User {
   sentRequests     FriendRequest[] @relation("RequestSent")
   receivedRequests FriendRequest[] @relation("RequestReceived")
 
+  blockedUsers   BlockedUser[] @relation("blocker")
+  blockedByUsers BlockedUser[] @relation("blocked")
+
   secret        String?
   refreshTokens RefreshToken[]
 
@@ -85,6 +88,17 @@ model BlacklistedToken {
   token     String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+model BlockedUser {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  timestamp DateTime @default(now())
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id])
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
 }
 
 model RefreshToken {

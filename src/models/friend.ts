@@ -48,3 +48,16 @@ export interface ResolveFriendRequestInput {
     request_id: string;
     action: boolean;
 }
+
+export interface BlockUserInput {
+    blocked_uid: string;
+}
+
+export interface BlockedUserModel {
+    id: string;
+    blockerId: string;
+    blockedId: string;
+    timestamp: Date;
+    blocker?: UserModel;
+    blocked?: UserModel;
+}
