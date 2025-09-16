@@ -14,6 +14,7 @@ import fastifySwaggerUi from '@fastify/swagger-ui';
 import type { ApplicationHook, LifecycleHook } from "fastify/types/hooks.js";
 
 import jwt from '@fastify/jwt';
+import fcors from '@fastify/cors';
 import fcookie from '@fastify/cookie';
 import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
@@ -140,6 +141,10 @@ export default class Server {
             limits: { fileSize: this.multipartFSize }
         });
         await this.fastify.register(rateLimit, this.rateLimitOpts);
+        await this.fastify.register(fcors, {
+            origin: "http://localhost:5173",
+            credentials: true
+        });
         for (const plugin of this.plugins) {
             await this.fastify.register(plugin);
         }
