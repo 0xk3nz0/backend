@@ -73,9 +73,15 @@ export interface CreateRoomPayload {
 }
 
 export interface UpdateUserStatusPayload {
-    status: 'ONLINE' | 'AWAY' | 'BUSY' | 'IN_GAME' | 'OFFLINE';
+    userId: string;
+    status: 'ONLINE' | 'BUSY' | 'IN_GAME' | 'OFFLINE'; // 'AWAY'
 }
 
+export interface EditMessagePayload {
+    messageId: string,
+    newText: string,
+    userId: string
+}
 
 export type WSMessageType =
     | 'create_room'

@@ -3,16 +3,19 @@
 
 import { authenticateWebSocketToken } from 'middleware/websocket.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import * as chatModel from '../models/chat.js';
 import { wsSchema } from '../schemas/chat.js';
 import { prisma } from '../utils/prisma.js';
 import { wsValidators } from '../app.js';
 import { WebSocket as WS } from 'ws';
-import * as chatModel from '../models/chat.js'
+
 
 type WSMessageType =
     | 'join_room'
     | 'leave_room'
     | 'create_room'
+    | 'delete_room'
+    | 'edit_message'
     | 'send_message'
     | 'send_direct_message'
     | 'get_messages'
@@ -28,9 +31,19 @@ interface WSMessage<T = any> {
     payload: T;
 }
 
+// Extended Websocket type
+type ExtendedWS = WS & { userData?: { userId: string; rooms: Set<string> }, authenticatedUser: any };
 
 // Store live connections per room
-const liveConnections: Record<string, Set<WS & { userData?: { userId: string; roomId: string } }>> = {};
+// const liveConnections: Record<string, Set<WS & { userData?: { userId: string; roomId: string } }>> = {};
+
+// Store live connections per user
+// const userConnections: Map<string, Set<WS & { userData?: { userId: string; roomId: string } }>> = new Map();
+
+
+const liveConnections: Record<string, Set<ExtendedWS>> = {};
+const userConnections: Map<string, Set<ExtendedWS>> = new Map();
+
 
 // HTTP Handlers
 export const createMessageHandler = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -176,7 +189,7 @@ const clientOffsets: Map<WS, Map<string, number>> = new Map();
  * @param connection - The WebSocket connection object, extended with optional userData for tracking user and room.
  * @param request - The FastifyRequest object associated with the WebSocket upgrade.
  */
-export const websocketHandler = async (connection: WS & { userData?: { userId: string; roomId: string }, authenticatedUser: any }, request: FastifyRequest) => {
+export const websocketHandler = async (connection: ExtendedWS, request: FastifyRequest) => {
     request.log.info('Client connected');
 
     // ⚡ Common close codes
@@ -200,6 +213,13 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
     // Store the authenticated user
     connection.authenticatedUser = authResult.user;
+
+    // Add connection to userConnections
+    const userId = authResult.user.id;
+    if (!userConnections.has(userId)) {
+        userConnections.set(userId, new Set());
+    }
+    userConnections.get(userId)!.add(connection);
 
     connection.on('message', async (rawMessage) => {
         let msg: WSMessage;
@@ -315,7 +335,11 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         // Initialize live connections for this room
                         liveConnections[newRoom.id] = new Set();
                         liveConnections[newRoom.id]?.add(connection);
-                        connection.userData = { userId: authUser.id, roomId: newRoom.id };
+
+                        if (!connection.userData) {
+                            connection.userData = { userId: authUser.id, rooms: new Set() };
+                        }
+                        connection.userData.rooms.add(newRoom.id);
 
                         // Send success response
                         connection.send(JSON.stringify({
@@ -374,7 +398,11 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     // Track connection
                     liveConnections[roomId] = liveConnections[roomId] ?? new Set();
                     liveConnections[roomId].add(connection);
-                    connection.userData = { userId, roomId };
+
+                    if (!connection.userData) {
+                        connection.userData = { userId, rooms: new Set() };
+                    }
+                    connection.userData.rooms.add(roomId);
 
                     // connection.send(JSON.stringify({ type: 'joined', payload: { roomId } }));
                     connection.send(JSON.stringify({ type: 'joined', payload: {
@@ -425,13 +453,90 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
                     // Remove connection
                     liveConnections[roomId]?.delete(connection);
-                    delete connection.userData;
+                    if (connection.userData?.rooms) {
+                        connection.userData.rooms.delete(roomId);
+                        if (connection.userData.rooms.size === 0) {
+                            delete connection.userData;
+                        }
+                    }
 
                     await prisma.roomMember.delete({
                         where: { userId_roomId: { userId, roomId } }
                     });
 
+                    // Notify room members
+                    liveConnections[roomId]?.forEach((ws) => {
+                        if (ws.readyState === WS.OPEN && ws.userData?.userId !== userId) {
+                            ws.send(JSON.stringify({
+                                type: 'member_left',
+                                payload: { roomId, userId }
+                            }));
+                        }
+                    });
+
                     connection.send(JSON.stringify({ type: 'left', payload: { roomId, userId } }));
+                    break;
+                }
+
+                case 'delete_room': {
+                    if (!checkRateLimit(connection, 1, 60000)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return;
+                    }
+                    const { roomId } = payload as { roomId: string }
+
+                    // Step 1: Check if room exists
+                    const room = await prisma.room.findUnique({
+                        where: { id: roomId }
+                    });
+                    if (!room) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Room not found to be deleted!'
+                        }));
+                        return;
+                    }
+
+                    // Step 2: Check membership and ownership
+                    const userMembership = await prisma.roomMember.findUnique({
+                        where: { userId_roomId: { userId: authUser.id, roomId } }
+                    });
+
+                    if (!userMembership || userMembership.role !== 'OWNER') {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Only room owner can delete the room'
+                        }));
+                        return ;
+                    }
+
+                    // Step 3: Delete room
+                    await prisma.room.delete({
+                        where: { id: roomId }
+                    });
+
+                    // Step 4: Notify and clean up connections
+                    liveConnections[roomId]?.forEach((ws) => {
+                        if (ws.readyState === WS.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'room_removed',
+                                payload: { roomId }
+                            }));
+                        }
+                        ws.userData?.rooms?.delete(roomId);
+                        if (ws.userData?.rooms?.size === 0) {
+                            delete ws.userData;
+                        }
+                    });
+                    // Step 5: Confirm success to owner
+                    delete liveConnections[roomId];
+                    connection.send(JSON.stringify({
+                        type: 'room_deleted_success',
+                        payload: { roomId }
+                    }));
                     break;
                 }
 
@@ -485,6 +590,13 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'kick_member': {
+                    if (!checkRateLimit(connection, 3, 60000)) { // 3 kicks per minute
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return;
+                    }
                     const { roomId, targetUserId } = payload as chatModel.KickMemberPayload;
 
                     // Check if user is admin/owner of this room
@@ -540,8 +652,8 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         return ;
                     }
 
-                    // Can't kick owner (unless you're owner)
-                    if (targetMembership.role === 'OWNER' && userMembership.role !== 'OWNER') {
+                    // Can't kick owner: had l3iba fchkel
+                    if (targetMembership.role === 'OWNER') { // && userMembership.role !== 'OWNER') {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Cannot kick room owner'
@@ -558,11 +670,12 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         }
                     });
 
-                    // Disconnect the kicked user's websocket connections
-                    liveConnections[roomId]?.forEach((ws) => {
-                        if (ws.userData?.userId === targetUserId) {
+                    // Notify and disconnect the kicked user's connections
+                    const targetConnections = userConnections.get(targetUserId) || new Set();
+                    targetConnections?.forEach((ws) => {
+                        if (ws.userData?.roomId === roomId) {
                             ws.send(JSON.stringify({
-                                type: 'kicked from room',
+                                type: 'kicked_from_room',
                                 payload: {
                                     roomId,
                                     kickedBy: authUser.id,
@@ -573,6 +686,22 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                             delete ws.userData;
                         }
                     });
+
+                    // // Disconnect the kicked user's websocket connections
+                    // liveConnections[roomId]?.forEach((ws) => {
+                    //     if (ws.userData?.userId === targetUserId) {
+                    //         ws.send(JSON.stringify({
+                    //             type: 'kicked_from_room',
+                    //             payload: {
+                    //                 roomId,
+                    //                 kickedBy: authUser.id,
+                    //                 reason: 'You have been removed from this room'
+                    //             }
+                    //         }));
+                    //         liveConnections[roomId]?.delete(ws);
+                    //         delete ws.userData;
+                    //     }
+                    // });
 
                     // Notify all room members
                     liveConnections[roomId]?.forEach((ws) => {
@@ -601,6 +730,13 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'promote_member': {
+                    if (!checkRateLimit(connection, 3, 60000)) { // 3 promotions per minute
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return;
+                    }
                     const { roomId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
 
                     // Validate new role
@@ -630,7 +766,7 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         return ;
                     }
                     
-                    if (userMembership.role !== 'ADMIN' || userMembership.role !== 'OWNER') {
+                    if (userMembership.role !== 'ADMIN' && userMembership.role !== 'OWNER') {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Insufficient permissions: Only admins can promote members'
@@ -717,6 +853,22 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         }
                     });
 
+                    // Notify the promoted user across all their connections
+                    const targetConnections = userConnections.get(targetUserId) || new Set();
+                    targetConnections?.forEach((ws) => {
+                        if (ws.readyState === WS.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'member_role_changed',
+                                payload: {
+                                    roomId,
+                                    userId: targetUserId,
+                                    newRole,
+                                    changedBy: authUser.id
+                                }
+                            }));
+                        }
+                    });
+
                     // Confirm to admin
                     connection.send(JSON.stringify({
                         type: 'member_role_changed',
@@ -732,6 +884,14 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'send_message': {
+                    if (!checkRateLimit(connection)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return ;
+                    }
+
                     const { roomId, senderId, text } = payload as chatModel.SendMessagePayload;
 
                     if (authUser.id !== senderId) {
@@ -861,8 +1021,16 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                     }
                     const roomOffsets = clientOffsets.get(connection)!;
 
-                    // Get last offset for this room, default to 0
-                    const offset = roomOffsets.get(roomId) ?? 0;
+                    // Step 1: Handle reset - set offset to 0 if requested
+                    let offset = 0;
+                    if (reset) {
+                        offset = roomOffsets.get(roomId) ?? 0;
+                    }
+
+                    // Step 2: If reset, clear the stored offset to start fresh
+                    if (reset) {
+                        roomOffsets.set(roomId, 0);
+                    }
                     
                     // Validate room
                     const room = await prisma.room.findUnique({ where: { id: roomId } });
@@ -889,6 +1057,14 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                 }
 
                 case 'send_direct_message': {
+                    if (!checkRateLimit(connection)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return ;
+                    }
+
                     const { senderId, receiverId, text } = payload as chatModel.DirectMessagePayload;
 
                     if (authUser.id !== senderId) {
@@ -918,34 +1094,295 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                         data: { content: text, senderId, receiverId },
                     });
 
-                    // Broadcast to receiver if online
-                    Object.values(liveConnections)
-                        .flatMap((set) => Array.from(set))
-                        .forEach((ws) => {
-                            if (ws.userData?.userId === receiverId && ws.readyState === WS.OPEN) {
-                                ws.send(
-                                    JSON.stringify({
-                                        type: 'direct_message',
-                                        payload: {
-                                            id: message.id,
-                                            senderId,
-                                            receiverId,
-                                            text,
-                                            createdAt: message.createdAt,
-                                        },
-                                    })
-                                );
-                            }
-                        });
+                    // Send to receiver's connections
+                    const receiverConnections = userConnections.get(receiverId) || new Set();
+                    receiverConnections.forEach((ws) => {
+                        if (ws.readyState === WS.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'direct_message',
+                                payload: {
+                                    id: message.id,
+                                    senderId,
+                                    receiverId,
+                                    text,
+                                    createdAt: message.createdAt,
+                                }
+                            }));
+                        }
+                    });
+
+                    // // Broadcast to receiver if online
+                    // Object.values(liveConnections)
+                    //     .flatMap((set) => Array.from(set))
+                    //     .forEach((ws) => {
+                    //         if (ws.userData?.userId === receiverId && ws.readyState === WS.OPEN) {
+                    //             ws.send(
+                    //                 JSON.stringify({
+                    //                     type: 'direct_message',
+                    //                     payload: {
+                    //                         id: message.id,
+                    //                         senderId,
+                    //                         receiverId,
+                    //                         text,
+                    //                         createdAt: message.createdAt,
+                    //                     },
+                    //                 })
+                    //             );
+                    //         }
+                    //     });
 
                     // Confirm to sender
                     connection.send(JSON.stringify({ type: 'direct_message_sent', payload: message }));
                     break;
                 }
 
-                /// @todo get members in a room
+                case 'edit_message': {
+                    if(!checkRateLimit(connection, 5, 10000)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return ;
+                    }
+
+                    const { messageId, newText, userId } = payload as chatModel.EditMessagePayload;
+
+                    // Verify user is authenticated and matches
+                    if (authUser.id !== userId) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: Cannot edit message as another user'
+                        }));
+                        return ;
+                    }
+
+                    // Validate message exists and get room info
+                    const message = await prisma.message.findUnique({
+                        where: {
+                            id: messageId
+                        },
+                        include: {
+                            room: { include: { members: true } },
+                            sender: true
+                        }
+                    });
+
+                    if (!message) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Message not found'
+                        }));
+                        return ;
+                    }
+
+                    // Check if user is the message sender
+                    if (message.sender.id !== authUser.id) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: Can only edit your own messages'
+                        }));
+                        return ;
+                    }
+
+                    // For room messages, verify user is still a room member
+                    const roomMember = await prisma.roomMember.findUnique({
+                        where: {
+                            userId_roomId: {
+                                userId: authUser.id,
+                                roomId: message.roomId // to be checked later roomId cannot be null in this case
+                            }
+                        }
+                    });
+
+                    if (!roomMember) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Not a member of this room'
+                        }));
+                        return ;
+                    }
+
+                    // Optional: Check if message is too old to edit (e.g., 24 hours)
+                    const messageAge = Date.now() - message.createdAt.getTime();
+                    const maxEditAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+                    if (messageAge > maxEditAge) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Message is too old to edit (max 24 hours)'
+                        }));
+                        return ;
+                    }
+
+                    // Validate new text
+                    if (!newText || newText.trim().length === 0) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Message content cannot be empty'
+                        }));
+                        return ;
+                    }
+
+                    if (newText.length > 2000) { // Max message length can be change later
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Message max length is 2000 characters'
+                        }));
+                        return ;
+                    }
+
+                    try {
+                        // Update the message
+                        const updatedMessage = await prisma.message.update({
+                            where: {
+                                id: messageId
+                            },
+                            data: {
+                                content: newText.trim(),
+                                updatedAt: new Date()
+                            },
+                            include: {
+                                sender: true,
+                                receiver: true
+                            }
+                        });
+
+                        // Broadcast the edit to relevant connections
+                        if (message.roomId) {
+                            // Room message - broadcast to all room members
+                            liveConnections[message.roomId]?.forEach((ws) => {
+                                if (ws.readyState == WS.OPEN && ws !== connection) {
+                                    ws.send(JSON.stringify({
+                                        type: 'message_edited',
+                                        payload: {
+                                            messageId: updatedMessage.id,
+                                            roomId: message.roomId,
+                                            senderId: updatedMessage.senderId,
+                                            newText: updatedMessage.content,
+                                            editedAt: updatedMessage.updatedAt,
+                                            senderName: updatedMessage.sender
+                                        }
+                                    }));
+                                }
+                            });
+                        } else if(message.receiverId) {
+                            // Direct message - notify both sender and receiver
+                            const targetUsers = [message.senderId, message.receiverId];
+                            const targetConnections = targetUsers.flatMap(id => Array.from(userConnections.get(id) || new Set()));
+                            targetConnections.forEach((ws) => {
+                                if (ws.readyState === WS.OPEN) {
+                                    ws.send(JSON.stringify({
+                                        type: 'direct_message_edited',
+                                        payload: {
+                                            messageId: updatedMessage.id,
+                                            senderId: updatedMessage.senderId,
+                                            receiverId: updatedMessage.receiverId,
+                                            newText: updatedMessage.content,
+                                            editedAt: updatedMessage.updatedAt,
+                                        }
+                                    }));
+                                }
+                            });
+
+                            // Object.values(liveConnections)      // Takes just the values (the Sets) and puts them into an array.
+                            // .flatMap((set) => Array.from(set))  // Each Set is converted into an array (Array.from(set)).
+                            //                                     // flatMap merges all those arrays together.
+                            //                                     // At this point → we have every WebSocket connection in one array.
+                            // .forEach((ws) => {                  // Loop through each WebSocket connection
+                            //     if (ws.userData?.userId && targetUsers.includes(ws.userData?.userId) && ws.readyState === WS.OPEN) {
+                            //         ws.send(JSON.stringify({
+                            //             type: 'direct_message_edited',
+                            //             payload: {
+                            //                 messageId: updatedMessage.id,
+                            //                 senderId: updatedMessage.senderId,
+                            //                 receiverId: updatedMessage.receiverId,
+                            //                 newText: updatedMessage.content,
+                            //                 editedAt: updatedMessage.updatedAt,
+                            //             }
+                            //         }));
+                            //     }
+                            // });
+                        }
+
+                        // Confirm to the editor
+                        connection.send(JSON.stringify({
+                            type: 'message_edit_success',
+                            payload: {
+                                messageId: updatedMessage.id,
+                                newText: updatedMessage.content,
+                                editedAt: updatedMessage.updatedAt
+                            }
+                        }));
+
+                    } catch(error) {
+                        request.log.error({ error, messageId }, 'Failed to edit message');
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to edit message'
+                        }));
+                    }
+                    break;
+                }
+
+                case 'update_status': {
+                    const { userId, status } = payload as chatModel.UpdateUserStatusPayload;
+                    if (userId !== authUser.id) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: User ID mismatch'
+                        }));
+                        return ;
+                    }
+
+                    const validStatuses = ['IN_GAME', 'OFFLINE', 'ONLINE', 'BUSY']; // 'AWAY
+                    if (!validStatuses.includes(status)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Invalid status. Valid statuses: IN_GAME, OFFLINE, ONLINE, BUSY'
+                        }));
+                        return ;
+                    }
+
+                    // Persist status to database
+                    await prisma.user.update({
+                        where: { id: userId },
+                        data: { status }
+                    });
+
+                    // Update status in database or notify relevant users
+                    const userRooms = await prisma.roomMember.findMany({
+                        where: { userId }
+                    });
+
+                    // Notify users
+                    userRooms.forEach((room) => {
+                        liveConnections[room.roomId]?.forEach((ws) => {
+                            if (ws.readyState === WS.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'user_status',
+                                    payload: { userId, status }
+                                }));
+                            }
+                        });
+                    });
+
+                    // Confirm to sender
+                    connection.send(JSON.stringify({
+                        type: 'status_updated',
+                        payload: { userId, status }
+                    }));
+
+                    break;
+                }
 
                 case 'typing': {
+                    if(!checkRateLimit(connection, 5, 10000)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return ;
+                    }
+
                     const { userId, status, roomId, receiverId } = payload as chatModel.TypingPayload;
 
                     if (authUser.id !== userId) {
@@ -1003,14 +1440,28 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
                             return;
                         }
 
-                        // Broadcast typing status to receiver
-                        Object.values(liveConnections)
-                            .flatMap((set) => Array.from(set))
-                            .forEach((ws) => {
-                                if (ws.userData?.userId === receiverId && ws.readyState === WS.OPEN) {
-                                    ws.send(JSON.stringify({ type: 'typing', payload: { userId, receiverId, status } }));
-                                }
-                            });
+                        const receiverConnections = userConnections.get(receiverId) || new Set();
+                        receiverConnections.forEach((ws) => {
+                            if (ws.readyState === WS.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'typing',
+                                    payload: {
+                                        userId,
+                                        receiverId,
+                                        status
+                                    }
+                                }));
+                            }
+                        });
+
+                        // // Broadcast typing status to receiver
+                        // Object.values(liveConnections)
+                        //     .flatMap((set) => Array.from(set))
+                        //     .forEach((ws) => {
+                        //         if (ws.userData?.userId === receiverId && ws.readyState === WS.OPEN) {
+                        //             ws.send(JSON.stringify({ type: 'typing', payload: { userId, receiverId, status } }));
+                        //         }
+                        //     });
                     }
                     break;
                 }
@@ -1027,15 +1478,37 @@ export const websocketHandler = async (connection: WS & { userData?: { userId: s
 
     connection.on('close', () => {
         request.log.info('Client disconnected');
-        
-        // Clean up client offsets tracking
-        clientOffsets.delete(connection);
-        
-        if (connection.userData?.roomId) {
-            liveConnections[connection.userData.roomId]?.delete(connection);
-            if (liveConnections[connection.userData.roomId]?.size === 0) {
-                delete liveConnections[connection.userData.roomId];
+
+        // Step 1: Clean up rateLimits for this connection
+        rateLimits.delete(connection);
+
+        // Step 2: Clean up userConnections
+        if (connection.authenticatedUser?.id) {
+            const userConns = userConnections.get(connection.authenticatedUser.id);
+            if (userConns) {
+                userConns.delete(connection);
+                if (userConns.size === 0) {
+                    userConnections.delete(connection.authenticatedUser.id);
+                }
             }
+        }
+        
+        // Step 3: Clean up client offsets tracking
+        clientOffsets.delete(connection);
+
+        // Step 4: Clean up liveConnections
+        if (connection.userData?.rooms) {
+            connection.userData.rooms.forEach((roomId) => {
+                liveConnections[roomId]?.delete(connection);
+                if (liveConnections[roomId]?.size === 0) {
+                    delete liveConnections[roomId];
+                }
+            });
+            delete connection.userData;
+            // liveConnections[connection.userData.roomId]?.delete(connection);
+            // if (liveConnections[connection.userData.roomId]?.size === 0) {
+            //     delete liveConnections[connection.userData.roomId];
+            // }
         }
     });
 

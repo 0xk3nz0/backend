@@ -201,6 +201,15 @@ export const wsSchema = {
     create_room: {
         type: 'object',
     },
+    edit_message: {
+        type: 'object',
+    },
+    update_status: {
+        type: 'object',
+    },
+    delete_room: {
+        type: 'object'
+    },
     typing: {
         type: 'object',
         required: ['userId', 'status'],
