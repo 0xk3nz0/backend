@@ -16,6 +16,7 @@ type WSMessageType =
     | 'create_room'
     | 'delete_room'
     | 'edit_message'
+    | 'delete_message'
     | 'send_message'
     | 'send_direct_message'
     | 'get_messages'
@@ -129,7 +130,7 @@ export const getMessageHandler = async (request: FastifyRequest, reply: FastifyR
 // Rate limiting and Spam prevention
 
 // Track message counts and timestamps
-const rateLimits = new Map<WS, { count: number, resetTime: number }>();
+const rateLimits = new Map<string, { count: number, resetTime: number }>(); // key: userId
 
 // Check if a connection is within rate limits
 // 🔐 JWT Authentication: All sensitive operations require valid JWT tokens
@@ -140,12 +141,23 @@ const rateLimits = new Map<WS, { count: number, resetTime: number }>();
 // 📝 Comprehensive Logging: Detailed operation tracking for monitoring
 // ✅ Input Validation: Message length limits and spam detection
 // 🔒 Permission Checks: Users must have room access to perform actions
-const checkRateLimit = (connection: WS, maxRequests = 10, windowMs = 60000) => {
+const checkRateLimit = (connection: ExtendedWS, maxRequests = 10, windowMs = 60000) => {
+    const userId = connection.authenticatedUser?.id;
+    if (!userId) {
+        return false;
+    }
+
     const now = Date.now();
-    const rateLimit = rateLimits.get(connection);
+    for (const [userId, limit] of rateLimits.entries()) {
+        if (now > limit.resetTime) {
+            rateLimits.delete(userId);
+        }
+    }
+    
+    const rateLimit = rateLimits.get(userId);
 
     if (!rateLimit || now > rateLimit.resetTime) {
-        rateLimits.set(connection, { count: 1, resetTime: now + windowMs });
+        rateLimits.set(userId, { count: 1, resetTime: now + windowMs });
         return true;
     }
 
@@ -379,21 +391,27 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // Validate room and user
-                    const [room, user] = await Promise.all([
+                    const [room, user, membership] = await Promise.all([
                         prisma.room.findUnique({ where: { id: roomId }, include: { members: true } }),
                         prisma.user.findUnique({ where: { id: userId } }),
+                        prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } })
                     ]);
                     if (!room || !user) {
                         connection.send(JSON.stringify({ type: 'error', message: 'Room or user not found' }));
                         return;
                     }
+                    if(!membership) {
+                        await prisma.roomMember.create({
+                            data: { userId, roomId, role: 'MEMBER' }
+                        });
+                    }
 
-                    // Add room member
-                    await prisma.roomMember.upsert({
-                        where: { userId_roomId: { userId, roomId } },
-                        update: {},
-                        create: { userId, roomId, role: 'MEMBER' },
-                    });
+                    // // Add room member
+                    // await prisma.roomMember.upsert({
+                    //     where: { userId_roomId: { userId, roomId } },
+                    //     update: {},
+                    //     create: { userId, roomId, role: 'MEMBER' },
+                    // });
 
                     // Track connection
                     liveConnections[roomId] = liveConnections[roomId] ?? new Set();
@@ -405,12 +423,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     connection.userData.rooms.add(roomId);
 
                     // connection.send(JSON.stringify({ type: 'joined', payload: { roomId } }));
-                    connection.send(JSON.stringify({ type: 'joined', payload: {
-                        roomId: room.id,
-                        roomName: room.name,
-                        type: room.type,
-                        members: room.members.map(m => ({ userId: m.userId, role: m.role })),
-                        joinedAt: new Date().toISOString()
+                    connection.send(JSON.stringify({
+                        type: 'joined',
+                        payload: {
+                            roomId: room.id,
+                            roomName: room.name,
+                            type: room.type,
+                            members: room.members.map(m => ({ userId: m.userId, role: m.role })),
+                            joinedAt: new Date().toISOString()
                         }
                     }));
                     break;
@@ -439,7 +459,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     if (!roomMember) {
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Not a member of this room, are u lost'
+                            message: 'You are not a member of this room'
                         }));
                         return ;
                     }
@@ -617,7 +637,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
-                    if (userMembership.role !== 'ADMIN') { // && userMembership.role !== 'OWNER') {
+                    if (userMembership.role !== 'ADMIN' && userMembership.role !== 'OWNER') {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Insufficient permissions: Only admins can kick members'
@@ -629,7 +649,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     if (authUser.id === targetUserId) {
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Connot kick yourself, are u crazy!'
+                            message: 'Cannot kick yourself'
                         }));
                         return ;
                     }
@@ -673,7 +693,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     // Notify and disconnect the kicked user's connections
                     const targetConnections = userConnections.get(targetUserId) || new Set();
                     targetConnections?.forEach((ws) => {
-                        if (ws.userData?.roomId === roomId) {
+                        if (ws.userData?.rooms.has(roomId)) {
                             ws.send(JSON.stringify({
                                 type: 'kicked_from_room',
                                 payload: {
@@ -683,7 +703,10 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                 }
                             }));
                             liveConnections[roomId]?.delete(ws);
-                            delete ws.userData;
+                            ws.userData.rooms.delete(roomId);
+                            if (ws.userData.rooms.size === 0) {
+                                delete ws.userData;
+                            }
                         }
                     });
 
@@ -963,7 +986,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                 userId: authUser.id,
                                 roomId
                             }
-                        }
+                        },
+                        include: { room: true }
                     });
 
                     if (!roomMember) {
@@ -976,7 +1000,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // Validate room
-                    const room = await prisma.room.findUnique({ where: { id: roomId } });
+                    const room = roomMember.room;
                     if (!room) {
                         connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
                         return;
@@ -1022,9 +1046,9 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const roomOffsets = clientOffsets.get(connection)!;
 
                     // Step 1: Handle reset - set offset to 0 if requested
-                    let offset = 0;
+                    let offset = roomOffsets.get(roomId) ?? 0;
                     if (reset) {
-                        offset = roomOffsets.get(roomId) ?? 0;
+                        offset = 0;
                     }
 
                     // Step 2: If reset, clear the stored offset to start fresh
@@ -1259,7 +1283,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                             senderId: updatedMessage.senderId,
                                             newText: updatedMessage.content,
                                             editedAt: updatedMessage.updatedAt,
-                                            senderName: updatedMessage.sender
+                                            senderName: updatedMessage.sender.name
                                         }
                                     }));
                                 }
@@ -1320,6 +1344,97 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             message: 'Failed to edit message'
                         }));
                     }
+                    break;
+                }
+
+                case 'delete_message': {
+                    if(!checkRateLimit(connection, 5, 10000)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        return ;
+                    }
+
+                    const { messageId, userId } = payload as { messageId: string, userId: string };
+                    if (userId !== authUser.id) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: Cannot delete message as another user'
+                        }));
+                        return ;
+                    }
+
+                    const message = await prisma.message.findUnique({
+                        where: { id: messageId },
+                        include: { room: { include: { members: true } }, sender: true }
+                    });
+                    if (!message) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Message not found'
+                        }));
+                        return ;
+                    }
+
+                    if(message.sender.id !== authUser.id) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: Can only delete your own messages'
+                        }));
+                        return ;
+                    }
+
+                    if (message.roomId) {
+                        const roomMember = await prisma.roomMember.findUnique({
+                            where: {
+                                userId_roomId: {
+                                    userId: authUser.id,
+                                    roomId: message.roomId
+                                }
+                            }
+                        });
+                        if (!roomMember) {
+                            connection.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Not a member of this room'
+                            }));
+                            return ;
+                        }
+                    }
+
+                    await prisma.message.delete({
+                        where: { id: messageId }
+                    });
+                    if (message.roomId) {
+                        liveConnections[message.roomId]?.forEach((ws) => {
+                            if(ws.readyState === WS.OPEN && ws !== connection) {
+                                ws.send(JSON.stringify({
+                                    type: 'message_deleted',
+                                    payload: {
+                                        messageId,
+                                        roomId: message.roomId,
+                                        deletedBy: authUser.id
+                                    }
+                                }));
+                            }
+                        });
+                    } else if (message.receiverId) {
+                        const targetUsers = [message.senderId, message.receiverId];
+                        const targetConnections = targetUsers.flatMap(id => Array.from(userConnections.get(id) || new Set()));
+                        targetConnections.forEach((ws) => {
+                            if(ws.readyState === WS.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'direct_message_deleted',
+                                    payload: { messageId, deletedBy: authUser.id }
+                                }));
+                            }
+                        });
+                    }
+                    connection.send(JSON.stringify({
+                        type: 'message_delete_success',
+                        payload: { messageId, deletedBy: authUser.id }
+                    }));
                     break;
                 }
 
@@ -1480,7 +1595,10 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         request.log.info('Client disconnected');
 
         // Step 1: Clean up rateLimits for this connection
-        rateLimits.delete(connection);
+        const userId = connection.authenticatedUser?.id;
+        if (userId) {
+            rateLimits.delete(userId);
+        }
 
         // Step 2: Clean up userConnections
         if (connection.authenticatedUser?.id) {
