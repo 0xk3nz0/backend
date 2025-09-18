@@ -1,5 +1,6 @@
 
 
+import { CONFIG } from '../controllers/chat.js';
 
 export const createMessageSchema = {
     body: {
@@ -120,7 +121,7 @@ export const getMessageSchema = {
     },
 };
 
-export const wsSchema = {
+export const chatSchema = {
     join_room: {
         type: 'object',
         required: ['roomId', 'userId'],
@@ -150,6 +151,18 @@ export const wsSchema = {
             userId: { type: 'string', format: 'uuid' },
         },
         additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
     },
     send_message: {
         type: 'object',
@@ -157,9 +170,23 @@ export const wsSchema = {
         properties: {
             roomId: { type: 'string', format: 'uuid' },
             senderId: { type: 'string', format: 'uuid' },
-            text: { type: 'string', minLength: 1, maxLength: 2000 },
+            text: { type: 'string', minLength: 1, maxLength: CONFIG.MESSAGE.MAX_LENGTH },
         },
         additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                senderId: 'senderId is required',
+                text: 'text is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                senderId: 'senderId must be a valid UUID string',
+                text: `text must be a string between 1 and ${CONFIG.MESSAGE.MAX_LENGTH} characters`,
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
     },
     get_messages: {
         type: 'object',
@@ -170,6 +197,18 @@ export const wsSchema = {
             offset: { type: 'number', minimum: 0, default: 0 },
         },
         additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                limit: 'limit must be a number between 1 and 100',
+                offset: 'offset must be a non-negative number',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
     },
     get_more_messages: {
         type: 'object',
@@ -180,6 +219,18 @@ export const wsSchema = {
             offset: { type: 'number', minimum: 0, default: 0 },
         },
         additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                limit: 'limit must be a number between 1 and 100',
+                offset: 'offset must be a non-negative number',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
     },
     send_direct_message: {
         type: 'object',
@@ -187,28 +238,192 @@ export const wsSchema = {
         properties: {
             senderId: { type: 'string', format: 'uuid' },
             receiverId: { type: 'string', format: 'uuid' },
-            text: { type: 'string', minLength: 1, maxLength: 2000 },
+            text: { type: 'string', minLength: 1, maxLength: CONFIG.MESSAGE.MAX_LENGTH },
         },
         additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                senderId: 'senderId is required',
+                receiverId: 'receiverId is required',
+                text: 'text is required',
+            },
+            properties: {
+                senderId: 'senderId must be a valid UUID string',
+                receiverId: 'receiverId must be a valid UUID string',
+                text: `text must be a string between 1 and ${CONFIG.MESSAGE.MAX_LENGTH} characters`,
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    delete_message: {
+        type: 'object',
+        required: ['messageId', 'userId'],
+        properties: {
+            messageId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                messageId: 'messageId is required',
+                userId: 'userId is required'
+            },
+            properties: {
+                messageId: 'messageId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
     },
     get_room_members: {
         type: 'object',
-    }, kick_member: {
+        required: ['roomId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required'
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
+    },
+    kick_member: {
         type: 'object',
-    } ,promote_member: {
+        required: ['roomId', 'targetUserId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            targetUserId: { type: 'string', format: 'uuid' }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                targetUserId: 'targetUserId is required'
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                targetUserId: 'targetUserId must be a valid UUID string'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
+    },
+    promote_member: {
         type: 'object',
+        required: ['roomId', 'targetUserId', 'newRole'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            targetUserId: { type: 'string', format: 'uuid' },
+            newRole: { type: 'string', enum: ['MEMBER', 'ADMIN', 'OWNER'] }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                targetUserId: 'targetUserId is required',
+                newRole: 'newRole is required'
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                targetUserId: 'targetUserId must be a valid UUID string',
+                newRole: 'newRole must be one of: MEMBER, ADMIN, OWNER'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
     },
     create_room: {
         type: 'object',
+        required: ['name'],
+        properties: {
+            name: { type: 'string', minLength: 1, maxLength: CONFIG.ROOM.MAX_NAME_LENGTH },
+            type: { type: 'string', enum: ['GROUP', 'DIRECT'], default: 'GROUP' },
+            description: { type: 'string', maxLength: 1000 }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                name: 'name is required'
+            },
+            properties: {
+                name: `name must be a string between 1 and ${CONFIG.ROOM.MAX_NAME_LENGTH} characters`,
+                type: 'type must be one of: GROUP, DIRECT',
+                description: 'description must be a string up to 1000 characters'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
     },
     edit_message: {
         type: 'object',
+        required: ['messageId', 'newText', 'userId'],
+        properties: {
+            messageId: { type: 'string', format: 'uuid' },
+            newText: { type: 'string', minLength: 1, maxLength: CONFIG.MESSAGE.MAX_LENGTH },
+            userId: { type: 'string', format: 'uuid' }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                messageId: 'messageId is required',
+                newText: 'newText is required',
+                userId: 'userId is required'
+            },
+            properties: {
+                messageId: 'messageId must be a valid UUID string',
+                newText: `newText must be a string between 1 and ${CONFIG.MESSAGE.MAX_LENGTH} characters`,
+                userId: 'userId must be a valid UUID string'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
     },
     update_status: {
         type: 'object',
+        required: ['userId', 'status'],
+        properties: {
+            userId: { type: 'string', format: 'uuid' },
+            status: { type: 'string', enum: ['IN_GAME', 'OFFLINE', 'ONLINE', 'BUSY'] }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                userId: 'userId is required',
+                status: 'status is required'
+            },
+            properties: {
+                userId: 'userId must be a valid UUID string',
+                status: 'status must be one of: IN_GAME, OFFLINE, ONLINE, BUSY'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
     },
     delete_room: {
-        type: 'object'
+        type: 'object',
+        required: ['roomId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' }
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required'
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string'
+            },
+            additionalProperties: 'No extra properties allowed'
+        }
     },
     typing: {
         type: 'object',
@@ -224,202 +439,20 @@ export const wsSchema = {
             { required: ['receiverId'], not: { required: ['roomId'] } },
         ],
         errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                userId: 'userId is required',
+                status: 'status is required'
+            },
+            properties: {
+                userId: 'userId must be a valid UUID string',
+                status: 'status must be a boolean',
+                roomId: 'roomId must be a valid UUID string',
+                receiverId: 'receiverId must be a valid UUID string'
+            },
             oneOf: 'You must provide either a roomId or a receiverId (but not both).',
+            additionalProperties: 'No extra properties allowed',
         },
         additionalProperties: false,
     },
 };
-
-
-// export const createMessageSchema = {
-//     body: {
-//         type: 'object',
-//         required: ['content', 'senderId'],
-//         properties: {
-//             content: {
-//                 type: 'string',
-//                 minLength: 1,
-//                 maxLength: 2000
-//             },
-//             senderId: {
-//                 type: 'string',
-//                 format: 'uuid'
-//             },
-//             receiverId: {
-//                 type: 'string',
-//                 format: 'uuid'
-//             },
-//             roomId: {
-//                 type: 'string',
-//                 format: 'uuid'
-//             }
-//         },
-//         oneOf: [
-//             { required: ["receiverId"] },
-//             { required: ["roomId"] }
-//         ],
-//         errorMessage: {
-//             required: {
-//                 content: "Message content is required",
-//                 senderId: "SenderId is required"
-//             },
-//             oneOf: "You must provide either a receiverId or a roomId (but not both)."
-//         },
-//         additionalProperties: false,
-//         // allOf: [
-//         //     {
-//         //         if: {
-//         //             not: {
-//         //                 required: ['roomId', 'receivedId']
-//         //             }
-//         //         },
-//         //         then: {
-//         //             errorMessage: 'Either roomId or receiverId must be provided'
-//         //         }
-//         //     }
-//         // ]
-//     },
-//     response: {
-//         201: {
-//             type: 'object',
-//             properties: {
-//                 message: {
-//                     type: 'object',
-//                     properties: {
-//                         id: {
-//                             type: 'string',
-//                             format: 'uuid'
-//                         },
-//                         content: {
-//                             type: 'string',
-//                         },
-//                         senderId: {
-//                             type: 'string',
-//                             format: 'uuid'
-//                         },
-//                         receiverId: {
-//                             type: 'string',
-//                             format: 'uuid'
-//                         },
-//                         roomId: {
-//                             type: 'string',
-//                             format: 'uuid'
-//                         },
-//                         createdAt: {
-//                             type: 'string',
-//                             format: 'date-time'
-//                         },
-//                         updatedAt: {
-//                             type: 'string',
-//                             format: 'date-time'
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     }
-// }
-
-
-// export const getMessageSchema = {
-//     querystring: {
-//         type: 'object',
-//         properties: {
-//             roomId: {
-//                 type: 'string',
-//                 format: 'uuid'
-//             },
-//             senderId: {
-//                 type: 'string',
-//                 format: 'uuid'
-//             },
-//             receiverId: {
-//                 type: 'string',
-//                 format: 'uuid'
-//             },
-//             limit: {
-//                 type: 'integer',
-//                 minimum: 1,
-//                 maximum: 100
-//             },
-//             offset: {
-//                 type: 'integer',
-//                 minimum: 0
-//             }
-//         },
-//         oneOf: [
-//             {
-//                 required: ['roomId'],
-//             },
-//             {
-//                 required: ['senderId', 'receiverId']
-//             }
-//         ]
-//     }
-//     // ,
-//     // response: {
-//     //     200: {
-//     //         type: 'object'
-//     //     },
-//     //     400: {
-//     //         type: 'object'
-//     //     }
-//     // }
-// }
-// export const wsSchema = {
-//     join_room: {
-//         type: 'object',
-//         required: ['roomId', 'userId'],
-//         properties: {
-//             roomId: { type: 'string', format: 'uuid' },
-//             userId: { type: 'string', format: 'uuid' }
-//         }
-//     },
-//     leave_room: {
-//         type: 'object',
-//         required: ['roomId', 'userId'],
-//         properties: {
-//             roomId: { type: 'string', format: 'uuid' },
-//             userId: { type: 'string', format: 'uuid' }
-//         }
-//     },
-//     send_message: {
-//         type: 'object',
-//         required: ['roomId', 'senderId', 'text'],
-//         properties: {
-//             roomId: { type: 'string', format: 'uuid' },
-//             senderId: { type: 'string', format: 'uuid' },
-//             text: { type: 'string' }
-//         }
-//     },
-//     get_messages: {
-//         type: 'object',
-//         required: ['roomId'],
-//         properties: {
-//             roomId: { type: 'string', format: 'uuid' },
-//             limit: { type: 'number', minimum: 1, maximum: 100 },
-//             offset: { type: 'number', minimum: 0 }
-//         }
-//     },
-//     send_direct_message: {
-//         type: 'object',
-//         required: ['senderId', 'receiverId', 'text'],
-//         properties: {
-//             senderId: { type: 'string', format: 'uuid' },
-//             receiverId: { type: 'string', format: 'uuid' },
-//             text: { type: 'string' }
-//         }
-//     },
-//     typing: {
-//         type: 'object',
-//         required: ['userId', 'status'],
-//         properties: {
-//             userId: { type: 'string', format: 'uuid' },
-//             status: { type: 'boolean' },
-//             roomId: { type: 'string', format: 'uuid' },      // optional for room typing
-//             receiverId: { type: 'string', format: 'uuid' }   // optional for direct typing
-//         }
-//     }
-// };
-
-

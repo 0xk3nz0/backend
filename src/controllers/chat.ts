@@ -1,14 +1,36 @@
 
 
-
-import { authenticateWebSocketToken } from 'middleware/websocket.js';
+import { authenticateWebSocketToken } from '../middleware/chat.js';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import * as chatModel from '../models/chat.js';
-import { wsSchema } from '../schemas/chat.js';
+import { chatSchema } from '../schemas/chat.js';
 import { prisma } from '../utils/prisma.js';
 import { wsValidators } from '../app.js';
 import { WebSocket as WS } from 'ws';
+import process from 'process';
 
+export const CONFIG = {
+    MESSAGE: {
+        MAX_LENGTH: parseInt(process.env.MAX_MESSAGE_LENGTH || '2000'),
+        EDIT_WINDOW_HOURS: parseInt(process.env.MESSAGE_EDIT_WINDOW_HOURS || '24')
+    },
+    ROOM: {
+        MAX_NAME_LENGTH: parseInt(process.env.MAX_ROOM_NAME_LENGTH || '100')
+    },
+    RATE_LIMITS: {
+        DELETED_MESSAGES_PER_MINUTE: parseInt(process.env.RATE_LIMIT_DELETE_MESSAGES || '5'),
+        ROOM_KICKS_PER_MINUTE: parseInt(process.env.RATE_LIMIT_ROOM_KICKS || '2'),
+        ADMIN_ACTIONS_PER_MINUTE: parseInt(process.env.RATE_LIMIT_ADMIN || '3'),
+        MESSAGES_PER_MINUTE: parseInt(process.env.RATE_LIMIT_MESSAGES || '10'),
+        TYPING_PER_10_SECONDS: parseInt(process.env.RATE_LIMIT_TYPING || '5'),
+        EDITS_PER_10_SECONDS: parseInt(process.env.RATE_LIMIT_EDITS || '5'),
+    },
+    CLEANUP: {
+        CLIENT_OFFSETS_MAX: parseInt(process.env.MAX_CLIENT_OFFSETS || '1000'),
+        CLIENT_OFFSETS_MAX_AGE_MINUTES: parseInt(process.env.CLIENT_OFFSETS_MAX_AGE || '30'),
+        CLEANUP_INTERVAL_MINUTES: parseInt(process.env.CLEANUP_INTERVAL || '5')
+    }
+} as const;
 
 type WSMessageType =
     | 'join_room'
@@ -34,13 +56,6 @@ interface WSMessage<T = any> {
 
 // Extended Websocket type
 type ExtendedWS = WS & { userData?: { userId: string; rooms: Set<string> }, authenticatedUser: any };
-
-// Store live connections per room
-// const liveConnections: Record<string, Set<WS & { userData?: { userId: string; roomId: string } }>> = {};
-
-// Store live connections per user
-// const userConnections: Map<string, Set<WS & { userData?: { userId: string; roomId: string } }>> = new Map();
-
 
 const liveConnections: Record<string, Set<ExtendedWS>> = {};
 const userConnections: Map<string, Set<ExtendedWS>> = new Map();
@@ -73,10 +88,11 @@ export const createMessageHandler = async (request: FastifyRequest, reply: Fasti
     }
 
     try {
+        const sanitizedContent = escapeHtml(content.trim());
         const message = await prisma.message.create({
             data: {
                 senderId,
-                content,
+                content: sanitizedContent,
                 receiverId: receiverId ?? null,
                 roomId: roomId ?? null,
             },
@@ -169,15 +185,100 @@ const checkRateLimit = (connection: ExtendedWS, maxRequests = 10, windowMs = 600
     return true;
 }
 
-// 
+interface RoomRateLimit {
+    count: number;
+    resetTime: number;
+}
+
+const roomRateLimits: Map<string, Map<string, RoomRateLimit>> = new Map();
+
+const checkRoomRateLimit = (connection: ExtendedWS, roomId: string, action: string, maxRequests = 3, windowMs = 60000) => {
+    const userId = connection.authenticatedUser?.id;
+    if (!userId) {
+        return false;
+    }
+
+    const now = Date.now();
+
+    // Initialize map for room if it doesn't exist
+    if (!roomRateLimits.has(roomId)) {
+        roomRateLimits.set(roomId, new Map());
+    }
+    const roomLimits = roomRateLimits.get(roomId)!;
+
+    // Clean up expired limits
+    for (const [actionKey, limit] of roomLimits.entries()) {
+        if (now > limit.resetTime) {
+            roomLimits.delete(actionKey);
+        }
+    }
+
+    const actionLimit = roomLimits.get(action);
+
+    if (!actionLimit || now > actionLimit.resetTime) {
+        roomLimits.set(action, { count: 1, resetTime: now + windowMs });
+        return true;
+    }
+
+    if (actionLimit.count >= maxRequests) {
+        return false;
+    }
+
+    actionLimit.count++;
+    return true;
+};
+
+// exreact token from header
 function extractTokenFromHeaders(headers: any): string | null {
     const auth = headers.authorization;
     return auth?.startsWith('Bearer') ? auth.slice(7) : null;
 }
 
 // Simulate the load more messages in a room
-const clientOffsets: Map<WS, Map<string, number>> = new Map();
+const clientOffsets: Map<WS, { offsets: Map<string, number>, lastAccess: number }> = new Map();
 
+const MAX_CLIENT_OFFSETS = 1000; // Maximum number of entries to keep
+const CLIENT_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+
+// Cleanup function for client offsets
+const cleanupClientOffsets = () => {
+    const now = Date.now();
+    const maxAge = 30 * 60 * 1000; // 30 minutes
+
+    let removedCount = 0;
+    for (const [connection, data] of clientOffsets.entries()) {
+        if (now - data.lastAccess > maxAge || connection.readyState !== WS.OPEN) {
+            clientOffsets.delete(connection);
+            removedCount++;
+        }
+    }
+
+    if (removedCount > 0) {
+        console.log(`Cleaned up ${removedCount} stale client offsets`);
+    }
+
+    if (clientOffsets.size > MAX_CLIENT_OFFSETS) {
+        const sortedEntries = Array.from(clientOffsets.entries())
+            .sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+        const toRemove = sortedEntries.slice(0, clientOffsets.size - MAX_CLIENT_OFFSETS);
+        toRemove.forEach(([connection]) => clientOffsets.delete(connection));
+        console.log(`Removed ${toRemove.length} oldest client offsets due to max limit`);
+    }
+};
+
+// Start cleanup interval
+const cleanupInterval = setInterval(cleanupClientOffsets, CLIENT_CLEANUP_INTERVAL);
+
+
+// Prevent XSS: escape <, >, &, ", ' => &lt;, &gt;, &amp;, &quot;, &#39;
+const escapeHtml = (input: string): string => {
+    return input
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 /**
  * Handles incoming WebSocket connections and routes messages based on their type.
@@ -243,7 +344,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         }
 
         const { type, payload } = msg;
-        const schema = wsSchema[type];
+        const schema = chatSchema[type];
         if (!type || !payload) {
             connection.send(JSON.stringify({ type: 'error', message: 'Type and payload are required' }));
             return;
@@ -297,7 +398,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
             switch (type) {
                 case 'create_room': {
                     const { name, type = 'GROUP', description } = payload as chatModel.CreateRoomPayload;
-
+                    
                     // Validate room name
                     if (!name || name.trim().length === 0) {
                         connection.send(JSON.stringify({
@@ -306,15 +407,15 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         }));
                         return ;
                     }
-
-                    if (name.length > 100) {
+                    
+                    if (name.length > CONFIG.ROOM.MAX_NAME_LENGTH) {
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Room name must be less than 100 characters'
+                            message: `Room name must be less than ${CONFIG.ROOM.MAX_NAME_LENGTH} characters`
                         }));
                         return ;
                     }
-
+                    
                     const validTypes = ['DIRECT', 'GROUP']; // 'CHANNEL'
                     if (!validTypes.includes(type)) {
                         connection.send(JSON.stringify({
@@ -325,13 +426,15 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     try {
+                        const sanitizedName = escapeHtml(name.trim());
+                        const sanitizedDescription = description ? escapeHtml(description.trim()) : null;
+
                         // Create the room
                         const newRoom = await prisma.room.create({
                             data: {
-                                name: name.trim(),
+                                name: sanitizedName,
                                 type,
-                                // createdBy: authUser.id
-                                // description: description?.trim() || null,
+                                // description: sanitizedDescription,
                             }
                         });
 
@@ -390,49 +493,71 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
-                    // Validate room and user
-                    const [room, user, membership] = await Promise.all([
-                        prisma.room.findUnique({ where: { id: roomId }, include: { members: true } }),
-                        prisma.user.findUnique({ where: { id: userId } }),
-                        prisma.roomMember.findUnique({ where: { userId_roomId: { userId, roomId } } })
-                    ]);
-                    if (!room || !user) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Room or user not found' }));
-                        return;
-                    }
-                    if(!membership) {
-                        await prisma.roomMember.create({
-                            data: { userId, roomId, role: 'MEMBER' }
+                    try {
+                        // Validate room and user
+                        const roomMember = await prisma.roomMember.findUnique({
+                            where: { userId_roomId: { userId, roomId } }
                         });
-                    }
 
-                    // // Add room member
-                    // await prisma.roomMember.upsert({
-                    //     where: { userId_roomId: { userId, roomId } },
-                    //     update: {},
-                    //     create: { userId, roomId, role: 'MEMBER' },
-                    // });
-
-                    // Track connection
-                    liveConnections[roomId] = liveConnections[roomId] ?? new Set();
-                    liveConnections[roomId].add(connection);
-
-                    if (!connection.userData) {
-                        connection.userData = { userId, rooms: new Set() };
-                    }
-                    connection.userData.rooms.add(roomId);
-
-                    // connection.send(JSON.stringify({ type: 'joined', payload: { roomId } }));
-                    connection.send(JSON.stringify({
-                        type: 'joined',
-                        payload: {
-                            roomId: room.id,
-                            roomName: room.name,
-                            type: room.type,
-                            members: room.members.map(m => ({ userId: m.userId, role: m.role })),
-                            joinedAt: new Date().toISOString()
+                        const room = await prisma.room.findUnique({
+                            where: { id: roomId },
+                            include: {
+                                members: {
+                                    select: { userId: true, role: true }
+                                }
+                            }
+                        });
+                        if (!room) {
+                            connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+                            return;
                         }
-                    }));
+
+                        const user = await prisma.user.findUnique({ where: { id: userId } });
+                        if (!user) {
+                            connection.send(JSON.stringify({ type: 'error', message: 'User not found' }));
+                            return;
+                        }
+
+                        const membership = room.members.find(m => m.userId === userId);
+                        if(!membership) {
+                            await prisma.roomMember.create({
+                                data: { userId, roomId, role: 'MEMBER' }
+                            });
+                        }
+
+                        // Track connection
+                        liveConnections[roomId] = liveConnections[roomId] ?? new Set();
+                        liveConnections[roomId].add(connection);
+    
+                        if (!connection.userData) {
+                            connection.userData = { userId, rooms: new Set() };
+                        }
+                        connection.userData.rooms.add(roomId);
+    
+                        connection.send(JSON.stringify({
+                            type: 'joined',
+                            payload: {
+                                roomId: room.id,
+                                roomName: room.name,
+                                type: room.type,
+                                members: room.members.map(m => ({ userId: m.userId, role: m.role })),
+                                joinedAt: new Date().toISOString()
+                            }
+                        }));
+                    } catch(error) {
+                        request.log.error(
+                            {
+                                error,
+                                roomId,
+                                userId
+                            },
+                            'Failed to join room'
+                        );
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to join room'
+                        }));
+                    }
                     break;
                 }
 
@@ -499,7 +624,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'delete_room': {
-                    if (!checkRateLimit(connection, 1, 60000)) {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, 60000)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
@@ -515,7 +640,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     if (!room) {
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Room not found to be deleted!'
+                            message: 'Room not found'
                         }));
                         return;
                     }
@@ -563,61 +688,95 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'get_room_members': {
                     const { roomId } = payload as chatModel.GetRoomMembersPayload;
 
-                    const roomMember = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.id,
-                                roomId
-                            }
-                        }
-                    });
+                    try {
+                        const [roomMember, members] = await Promise.all([
+                            await prisma.roomMember.findUnique({
+                                where: {
+                                    userId_roomId: {
+                                        userId: authUser.id,
+                                        roomId
+                                    }
+                                }
+                            }),
+                            prisma.roomMember.findMany({
+                                where: { roomId },
+                                select: {
+                                    userId: true,
+                                    role: true,
+                                    joinedAt: true,
+                                    user: {
+                                        select: {
+                                            id: true,
+                                            name: true,
+                                            email: true,
+                                            status: true
+                                        }
+                                    }
+                                },
+                                orderBy: [
+                                    { role: 'asc' },
+                                    { joinedAt: 'asc' }
+                                ]
+                            })
+                        ]);
 
-                    if (!roomMember) {
+                        if (!roomMember) {
+                            connection.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Not a member of this room'
+                            }));
+                            return ;
+                        }
+    
+                        connection.send(JSON.stringify({
+                            type: 'room_members',
+                            payload: {
+                                roomId,
+                                members: members.map(m => ({
+                                    userId: m.userId,
+                                    role: m.role,
+                                    joinedAt: m.joinedAt,
+                                    user: m.user
+                                }))
+                            }
+                        }));
+
+                    } catch(error) {
+                        request.log.error(
+                            {
+                                error,
+                                roomId
+                            },
+                            'Failed to fetch room members'
+                        );
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Not a member of this room'
+                            message: 'Failed to fetch room members'
                         }));
-                        return ;
                     }
-                    const members = await prisma.roomMember.findMany({
-                        where: {
-                            roomId
-                        },
-                        include: {
-                            user: {
-                                select: {
-                                    id: true,
-                                    name: true,
-                                    email: true
-                                }
-                            }
-                        }
-                    });
-
-                    connection.send(JSON.stringify({
-                        type: 'room_members',
-                        payload: {
-                            roomId,
-                            members: members.map(m => ({
-                                userId: m.userId,
-                                role: m.role,
-                                joinedAt: m.joinedAt,
-                                user: m.user
-                            }))
-                        }
-                    }));
                     break;
                 }
 
                 case 'kick_member': {
-                    if (!checkRateLimit(connection, 3, 60000)) { // 3 kicks per minute
+                    const { roomId, targetUserId } = payload as chatModel.KickMemberPayload;
+
+                    // Room-specific rate limiting for kick actions
+                    if (!checkRoomRateLimit(connection, roomId, 'kick', 2, 60000)) { // 2 kicks per room per minute
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Room-specific rate limit exceeded for kick action'
+                        }));
+                        return;
+                    }
+
+                    // Check general rate limit
+                    if (!checkRateLimit(connection, 3, 60000)) { // 3 total admin actions per minute
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
                         }));
                         return;
                     }
-                    const { roomId, targetUserId } = payload as chatModel.KickMemberPayload;
 
                     // Check if user is admin/owner of this room
                     const userMembership = await prisma.roomMember.findUnique({
@@ -672,8 +831,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
-                    // Can't kick owner: had l3iba fchkel
-                    if (targetMembership.role === 'OWNER') { // && userMembership.role !== 'OWNER') {
+                    // Can't kick owne
+                    if (targetMembership.role === 'OWNER') {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Cannot kick room owner'
@@ -710,22 +869,6 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         }
                     });
 
-                    // // Disconnect the kicked user's websocket connections
-                    // liveConnections[roomId]?.forEach((ws) => {
-                    //     if (ws.userData?.userId === targetUserId) {
-                    //         ws.send(JSON.stringify({
-                    //             type: 'kicked_from_room',
-                    //             payload: {
-                    //                 roomId,
-                    //                 kickedBy: authUser.id,
-                    //                 reason: 'You have been removed from this room'
-                    //             }
-                    //         }));
-                    //         liveConnections[roomId]?.delete(ws);
-                    //         delete ws.userData;
-                    //     }
-                    // });
-
                     // Notify all room members
                     liveConnections[roomId]?.forEach((ws) => {
                         if (ws.readyState === WS.OPEN) {
@@ -748,7 +891,6 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             kickedUserId: targetUserId
                         }
                     }));
-
                     break;
                 }
 
@@ -833,76 +975,92 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
-                    // Special case: If promoting to OWNER, demote cureent owner to ADMIN
-                    if (newRole === 'OWNER') {
-                        await prisma.roomMember.update({
+                    try {
+
+                        // Special case: If promoting to OWNER, demote cureent owner to ADMIN
+                        if (newRole === 'OWNER') {
+                            await prisma.roomMember.update({
+                                where: {
+                                    userId_roomId: {
+                                        userId: authUser.id,
+                                        roomId
+                                    }
+                                },
+                                data: {
+                                    role: 'ADMIN'
+                                }
+                            });
+                        }
+
+                        // Update the target user's role
+                        const updatedMember = await prisma.roomMember.update({
                             where: {
                                 userId_roomId: {
-                                    userId: authUser.id,
+                                    userId: targetUserId,
                                     roomId
                                 }
                             },
                             data: {
-                                role: 'ADMIN'
+                                role: newRole
                             }
                         });
-                    }
 
-                    // Update the target user's role
-                    const updatedMember = await prisma.roomMember.update({
-                        where: {
-                            userId_roomId: {
-                                userId: targetUserId,
-                                roomId
+                        // Notify all room members
+                        liveConnections[roomId]?.forEach((ws) => {
+                            if (ws.readyState === WS.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'member_role_changed',
+                                    payload: {
+                                        roomId,
+                                        userId: targetUserId,
+                                        newRole,
+                                        changedBy: authUser.id
+                                    }
+                                }));
                             }
-                        },
-                        data: {
-                            role: newRole
-                        }
-                    });
+                        });
 
-                    // Notify all room members
-                    liveConnections[roomId]?.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN) {
-                            ws.send(JSON.stringify({
-                                type: 'member_role_changed',
-                                payload: {
-                                    roomId,
-                                    userId: targetUserId,
-                                    newRole,
-                                    changedBy: authUser.id
-                                }
-                            }));
-                        }
-                    });
+                        // Notify the promoted user across all their connections
+                        const targetConnections = userConnections.get(targetUserId) || new Set();
+                        targetConnections?.forEach((ws) => {
+                            if (ws.readyState === WS.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'member_role_changed',
+                                    payload: {
+                                        roomId,
+                                        userId: targetUserId,
+                                        newRole,
+                                        changedBy: authUser.id
+                                    }
+                                }));
+                            }
+                        });
 
-                    // Notify the promoted user across all their connections
-                    const targetConnections = userConnections.get(targetUserId) || new Set();
-                    targetConnections?.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN) {
-                            ws.send(JSON.stringify({
-                                type: 'member_role_changed',
-                                payload: {
-                                    roomId,
-                                    userId: targetUserId,
-                                    newRole,
-                                    changedBy: authUser.id
-                                }
-                            }));
-                        }
-                    });
-
-                    // Confirm to admin
-                    connection.send(JSON.stringify({
-                        type: 'member_role_changed',
-                        payload: {
-                            roomId,
-                            userId: targetUserId,
-                            newRole,
-                            oldRole: targetMembership.role
-                        }
-                    }));
-
+                        // Confirm to admin
+                        connection.send(JSON.stringify({
+                            type: 'member_role_changed',
+                            payload: {
+                                roomId,
+                                userId: targetUserId,
+                                newRole,
+                                oldRole: targetMembership.role
+                            }
+                        }));
+                    } catch(error) {
+                        request.log.error(
+                            {
+                                error,
+                                roomId,
+                                targetUserId,
+                                newRole
+                            },
+                            'Failed to promote member'
+                        );
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to update member role'
+                        }));
+                    }
                     break;
                 }
 
@@ -925,55 +1083,91 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return;
                     }
 
-                    const roomMember = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.id,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!roomMember) {
+                    // Validate message content
+                    if (!text || text.trim().length === 0) {
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Not a member of this room'
+                            message: 'Message content cannot be empty'
                         }));
                         return ;
                     }
 
-                    // Validate room and sender
-                    const [room, sender] = await Promise.all([
-                        prisma.room.findUnique({ where: { id: roomId } }),
-                        prisma.user.findUnique({ where: { id: senderId } }),
-                    ]);
-                    if (!room || !sender) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Room or sender not found' }));
-                        return;
+                    if (text.length > CONFIG.MESSAGE.MAX_LENGTH) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: `Message too long (max ${CONFIG.MESSAGE.MAX_LENGTH} characters)`
+                        }));
+                        return ;
                     }
 
-                    // Persist message
-                    const message = await prisma.message.create({
-                        data: { content: text, senderId, roomId },
-                    });
+                    try {
+                        const roomMember = await prisma.roomMember.findUnique({
+                            where: {
+                                userId_roomId: {
+                                    userId: authUser.id,
+                                    roomId
+                                }
+                            },
+                            include: {
+                                room: {
+                                    select: {
+                                        id: true,
+                                        name: true
+                                    }
+                                }
+                            }
+                        });
 
-                    // Broadcast to room
-                    liveConnections[roomId]?.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN) {
-                            ws.send(
-                                JSON.stringify({
-                                    type: 'message',
-                                    payload: {
-                                        id: message.id,
-                                        roomId,
-                                        senderId,
-                                        text,
-                                        createdAt: message.createdAt,
-                                    },
-                                })
-                            );
+                        if (!roomMember || !roomMember.room) {
+                            connection.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Not a member of this room or room not found'
+                            }));
+                            return ;
                         }
-                    });
+
+                        const sanitizedText = escapeHtml(text.trim());
+
+                        // Persist message
+                        const message = await prisma.message.create({
+                            data: {
+                                content: sanitizedText,
+                                senderId,
+                                roomId
+                            }
+                        });
+
+                        // Broadcast to room
+                        liveConnections[roomId]?.forEach((ws) => {
+                            if (ws.readyState === WS.OPEN) {
+                                ws.send(
+                                    JSON.stringify({
+                                        type: 'message',
+                                        payload: {
+                                            id: message.id,
+                                            roomId,
+                                            senderId,
+                                            text: sanitizedText,
+                                            createdAt: message.createdAt,
+                                        },
+                                    })
+                                );
+                            }
+                        });
+                    } catch(error) {
+                        request.log.error(
+                            {
+                                error,
+                                senderId,
+                                roomId
+                            },
+                            'Failed to send message'
+                        );
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to send message'
+                        }));
+                    }
                     break;
                 }
 
@@ -1041,19 +1235,18 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     // Initialize client tracking
                     if (!clientOffsets.has(connection)) {
-                        clientOffsets.set(connection, new Map());
+                        clientOffsets.set(connection, { offsets: new Map(), lastAccess: Date.now() });
                     }
-                    const roomOffsets = clientOffsets.get(connection)!;
+                    const clientData = clientOffsets.get(connection)!;
+                    clientData.lastAccess = Date.now();
 
-                    // Step 1: Handle reset - set offset to 0 if requested
-                    let offset = roomOffsets.get(roomId) ?? 0;
+                    // const roomOffsets = clientOffsets.get(connection)!;
+
+                    // Handle reset - set offset to 0 if requested
+                    let offset = clientData.offsets.get(roomId) ?? 0;
                     if (reset) {
                         offset = 0;
-                    }
-
-                    // Step 2: If reset, clear the stored offset to start fresh
-                    if (reset) {
-                        roomOffsets.set(roomId, 0);
+                        clientData.offsets.set(roomId, 0);
                     }
                     
                     // Validate room
@@ -1063,20 +1256,35 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return;
                     }
 
-                    // Fetch the next batch of messages
-                    const messages = await prisma.message.findMany({
-                        where: { roomId },
-                        include: { sender: true, receiver: true },
-                        orderBy: { createdAt: 'asc' },
-                        skip: offset,
-                        take: limit
-                    });
-
-                    // Update offset for next request
-                    roomOffsets.set(roomId, offset + messages.length);
-
-                    // Send messages to client
-                    connection.send(JSON.stringify({ type: 'more_messages', payload: messages }));
+                    try {
+                        // Fetch the next batch of messages
+                        const messages = await prisma.message.findMany({
+                            where: { roomId },
+                            include: { sender: true, receiver: true },
+                            orderBy: { createdAt: 'asc' },
+                            skip: offset,
+                            take: limit
+                        });
+    
+                        // Update offset for next request
+    
+                        // roomOffsets.set(roomId, offset + messages.length);
+                        clientData.offsets.set(roomId, offset + messages.length);
+    
+                        // Send messages to client
+                        connection.send(JSON.stringify({ type: 'more_messages', payload: messages }));
+                    } catch(error) {
+                        request.log.error(
+                            {
+                                error,
+                                roomId
+                            }
+                        );
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to fetch messages'
+                        }));
+                    }
                     break;
                 }
 
@@ -1113,55 +1321,52 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return;
                     }
 
-                    // Persist message
-                    const message = await prisma.message.create({
-                        data: { content: text, senderId, receiverId },
-                    });
+                    try {
+                        const sanitizedText = escapeHtml(text);
 
-                    // Send to receiver's connections
-                    const receiverConnections = userConnections.get(receiverId) || new Set();
-                    receiverConnections.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN) {
-                            ws.send(JSON.stringify({
-                                type: 'direct_message',
-                                payload: {
-                                    id: message.id,
-                                    senderId,
-                                    receiverId,
-                                    text,
-                                    createdAt: message.createdAt,
-                                }
-                            }));
-                        }
-                    });
-
-                    // // Broadcast to receiver if online
-                    // Object.values(liveConnections)
-                    //     .flatMap((set) => Array.from(set))
-                    //     .forEach((ws) => {
-                    //         if (ws.userData?.userId === receiverId && ws.readyState === WS.OPEN) {
-                    //             ws.send(
-                    //                 JSON.stringify({
-                    //                     type: 'direct_message',
-                    //                     payload: {
-                    //                         id: message.id,
-                    //                         senderId,
-                    //                         receiverId,
-                    //                         text,
-                    //                         createdAt: message.createdAt,
-                    //                     },
-                    //                 })
-                    //             );
-                    //         }
-                    //     });
-
-                    // Confirm to sender
-                    connection.send(JSON.stringify({ type: 'direct_message_sent', payload: message }));
+                        // Persist message
+                        const message = await prisma.message.create({
+                            data: { content: sanitizedText, senderId, receiverId },
+                        });
+    
+                        // Send to receiver's connections
+                        const receiverConnections = userConnections.get(receiverId) || new Set();
+                        receiverConnections.forEach((ws) => {
+                            if (ws.readyState === WS.OPEN) {
+                                ws.send(JSON.stringify({
+                                    type: 'direct_message',
+                                    payload: {
+                                        id: message.id,
+                                        senderId,
+                                        receiverId,
+                                        text: sanitizedText,
+                                        createdAt: message.createdAt,
+                                    }
+                                }));
+                            }
+                        });
+    
+                        // Confirm to sender
+                        connection.send(JSON.stringify({ type: 'direct_message_sent', payload: message }));
+                    } catch(error) {
+                        request.log.error(
+                            {
+                                error,
+                                senderId,
+                                receiverId
+                            },
+                            'Failed to send direct message'
+                        );
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Failed to send direct message'
+                        }));
+                    }
                     break;
                 }
 
                 case 'edit_message': {
-                    if(!checkRateLimit(connection, 5, 10000)) {
+                    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.EDITS_PER_10_SECONDS, 10000)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
@@ -1209,24 +1414,26 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // For room messages, verify user is still a room member
-                    const roomMember = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.id,
-                                roomId: message.roomId // to be checked later roomId cannot be null in this case
+                    if (message.roomId) {
+                        const roomMember = await prisma.roomMember.findUnique({
+                            where: {
+                                userId_roomId: {
+                                    userId: authUser.id,
+                                    roomId: message.roomId
+                                }
                             }
+                        });
+    
+                        if (!roomMember) {
+                            connection.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Not a member of this room'
+                            }));
+                            return ;
                         }
-                    });
-
-                    if (!roomMember) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Not a member of this room'
-                        }));
-                        return ;
                     }
 
-                    // Optional: Check if message is too old to edit (e.g., 24 hours)
+                    // Check if message is too old to edit (e.g., 24 hours)
                     const messageAge = Date.now() - message.createdAt.getTime();
                     const maxEditAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
                     if (messageAge > maxEditAge) {
@@ -1246,22 +1453,24 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
-                    if (newText.length > 2000) { // Max message length can be change later
+                    if (newText.length > CONFIG.MESSAGE.MAX_LENGTH) {
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Message max length is 2000 characters'
+                            message: `Message max length is ${CONFIG.MESSAGE.MAX_LENGTH} characters`
                         }));
                         return ;
                     }
 
                     try {
+                        const sanitizedText = escapeHtml(newText.trim());
+
                         // Update the message
                         const updatedMessage = await prisma.message.update({
                             where: {
                                 id: messageId
                             },
                             data: {
-                                content: newText.trim(),
+                                content: sanitizedText,
                                 updatedAt: new Date()
                             },
                             include: {
@@ -1291,7 +1500,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         } else if(message.receiverId) {
                             // Direct message - notify both sender and receiver
                             const targetUsers = [message.senderId, message.receiverId];
-                            const targetConnections = targetUsers.flatMap(id => Array.from(userConnections.get(id) || new Set()));
+                            const targetConnections = targetUsers.flatMap((id): ExtendedWS[] => Array.from(userConnections.get(id) || new Set()));
                             targetConnections.forEach((ws) => {
                                 if (ws.readyState === WS.OPEN) {
                                     ws.send(JSON.stringify({
@@ -1306,25 +1515,6 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                     }));
                                 }
                             });
-
-                            // Object.values(liveConnections)      // Takes just the values (the Sets) and puts them into an array.
-                            // .flatMap((set) => Array.from(set))  // Each Set is converted into an array (Array.from(set)).
-                            //                                     // flatMap merges all those arrays together.
-                            //                                     // At this point → we have every WebSocket connection in one array.
-                            // .forEach((ws) => {                  // Loop through each WebSocket connection
-                            //     if (ws.userData?.userId && targetUsers.includes(ws.userData?.userId) && ws.readyState === WS.OPEN) {
-                            //         ws.send(JSON.stringify({
-                            //             type: 'direct_message_edited',
-                            //             payload: {
-                            //                 messageId: updatedMessage.id,
-                            //                 senderId: updatedMessage.senderId,
-                            //                 receiverId: updatedMessage.receiverId,
-                            //                 newText: updatedMessage.content,
-                            //                 editedAt: updatedMessage.updatedAt,
-                            //             }
-                            //         }));
-                            //     }
-                            // });
                         }
 
                         // Confirm to the editor
@@ -1336,9 +1526,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                 editedAt: updatedMessage.updatedAt
                             }
                         }));
-
-                    } catch(error) {
-                        request.log.error({ error, messageId }, 'Failed to edit message');
+                    } catch (error) {
+                        request.log.error({ error, messageId, userId: authUser.id }, 'Failed to edit message');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Failed to edit message'
@@ -1348,7 +1537,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'delete_message': {
-                    if(!checkRateLimit(connection, 5, 10000)) {
+                    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.DELETED_MESSAGES_PER_MINUTE, 60000)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
@@ -1421,7 +1610,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         });
                     } else if (message.receiverId) {
                         const targetUsers = [message.senderId, message.receiverId];
-                        const targetConnections = targetUsers.flatMap(id => Array.from(userConnections.get(id) || new Set()));
+                        const targetConnections = targetUsers.flatMap((id): ExtendedWS[] => Array.from(userConnections.get(id) || new Set()));
                         targetConnections.forEach((ws) => {
                             if(ws.readyState === WS.OPEN) {
                                 ws.send(JSON.stringify({
@@ -1568,15 +1757,6 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                 }));
                             }
                         });
-
-                        // // Broadcast typing status to receiver
-                        // Object.values(liveConnections)
-                        //     .flatMap((set) => Array.from(set))
-                        //     .forEach((ws) => {
-                        //         if (ws.userData?.userId === receiverId && ws.readyState === WS.OPEN) {
-                        //             ws.send(JSON.stringify({ type: 'typing', payload: { userId, receiverId, status } }));
-                        //         }
-                        //     });
                     }
                     break;
                 }
@@ -1586,7 +1766,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     break;
             }
         } catch (error) {
-            request.log.error({ error, type }, 'WebSocket handler error');
+            request.log.error({ error, type, userId, payload }, 'WebSocket handler error');
             connection.send(JSON.stringify({ type: 'error', message: 'Server error' }));
         }
     });
@@ -1598,6 +1778,12 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         const userId = connection.authenticatedUser?.id;
         if (userId) {
             rateLimits.delete(userId);
+            // Clean up roomRateLimits for all rooms this user is in
+            if (connection.userData?.rooms) {
+                connection.userData.rooms.forEach((roomId) => {
+                    roomRateLimits.delete(roomId);
+                });
+            }
         }
 
         // Step 2: Clean up userConnections
@@ -1623,10 +1809,6 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
             });
             delete connection.userData;
-            // liveConnections[connection.userData.roomId]?.delete(connection);
-            // if (liveConnections[connection.userData.roomId]?.size === 0) {
-            //     delete liveConnections[connection.userData.roomId];
-            // }
         }
     });
 
@@ -1634,3 +1816,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         request.log.error({ error }, 'WebSocket connection error');
     });
 };
+
+// Cleanup on process exit
+process.on('SIGINT', () => {
+    clearInterval(cleanupInterval);
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    clearInterval(cleanupInterval);
+    process.exit(0);
+});

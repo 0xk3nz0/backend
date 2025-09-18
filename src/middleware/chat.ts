@@ -1,5 +1,3 @@
-import type { FastifyRequest, FastifyReply } from "fastify";
-import type { FastifyJWT } from "@fastify/jwt";
 
 
 

@@ -24,7 +24,7 @@ import { chatRoom } from './routes/chat.js';
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 import ServiceManagerPlugin from './plugins/service.js';
-import { wsSchema } from 'schemas/chat.js';
+import { chatSchema } from 'schemas/chat.js';
 import type Ajv from 'ajv';
 
 // Export fastify instance in development
@@ -37,7 +37,7 @@ addErrors(ajv);
 addFormats(ajv);
 
 export const wsValidators: Record<string, Ajv.ValidateFunction> = {};
-for (const [type, schema] of Object.entries(wsSchema)) {
+for (const [type, schema] of Object.entries(chatSchema)) {
   wsValidators[type] = ajv.compile(schema as object);
 }
 
