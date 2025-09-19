@@ -148,6 +148,27 @@ export const getMessageHandler = async (request: FastifyRequest, reply: FastifyR
 // Track message counts and timestamps
 const rateLimits = new Map<string, { count: number, resetTime: number }>(); // key: userId
 
+const cleanupExpiredRateLimits = () => {
+    const now = Date.now();
+    let removedCount = 0;
+
+    for (const [userId, limit] of rateLimits.entries()) {
+        if (now > limit.resetTime) {
+            rateLimits.delete(userId);
+            removedCount++;
+        }
+    }
+
+    if (removedCount > 0) {
+        console.log(`Cleaned up ${removedCount} expired rate limit entries`);
+    }
+
+    console.log(`Active rate limit entries: ${rateLimits.size}`);
+}
+
+// Start rate limit cleanup interval (every 5 minutes)
+const rateLimitCleanupInterval = setInterval(cleanupExpiredRateLimits, 5 * 60 * 1000);
+
 // Check if a connection is within rate limits
 // 🔐 JWT Authentication: All sensitive operations require valid JWT tokens
 // 🛡️ Authorization: Room membership verification before joining/messaging
@@ -164,26 +185,25 @@ const checkRateLimit = (connection: ExtendedWS, maxRequests = 10, windowMs = 600
     }
 
     const now = Date.now();
-    for (const [userId, limit] of rateLimits.entries()) {
-        if (now > limit.resetTime) {
-            rateLimits.delete(userId);
-        }
-    }
     
-    const rateLimit = rateLimits.get(userId);
+    // Get or create rate limit entry for this user
+    let rateLimit = rateLimits.get(userId);
 
+    // If no entry exists or the window has expired, create/reset it
     if (!rateLimit || now > rateLimit.resetTime) {
         rateLimits.set(userId, { count: 1, resetTime: now + windowMs });
         return true;
     }
 
+    // Check if user has exceeded the limit
     if (rateLimit.count >= maxRequests) {
         return false;
     }
 
+    // Increment the counter
     rateLimit.count++;
     return true;
-}
+};
 
 interface RoomRateLimit {
     count: number;
@@ -192,6 +212,35 @@ interface RoomRateLimit {
 
 const roomRateLimits: Map<string, Map<string, RoomRateLimit>> = new Map();
 
+// Cleanup function for room rate limits
+const cleanupExpiredRoomRateLimits = () => {
+    const now = Date.now();
+    let removedRoomCount = 0;
+    let removedActionCount = 0;
+
+    for (const [roomId, roomLimits] of roomRateLimits.entries()) {
+        for (const [actionKey, limit] of roomLimits.entries()) {
+            if (now > limit.resetTime) {
+                roomLimits.delete(actionKey);
+                removedActionCount++;
+            }
+        }
+        
+        // Remove empty room entries
+        if (roomLimits.size === 0) {
+            roomRateLimits.delete(roomId);
+            removedRoomCount++;
+        }
+    }
+
+    if (removedActionCount > 0 || removedRoomCount > 0) {
+        console.log(`Cleaned up ${removedActionCount} room rate limit actions and ${removedRoomCount} empty room entries`);
+    }
+};
+
+// Schedule room rate limit cleanup
+const roomRateLimitCleanupInterval = setInterval(cleanupExpiredRoomRateLimits, 5 * 60 * 1000);
+
 const checkRoomRateLimit = (connection: ExtendedWS, roomId: string, action: string, maxRequests = 3, windowMs = 60000) => {
     const userId = connection.authenticatedUser?.id;
     if (!userId) {
@@ -199,6 +248,7 @@ const checkRoomRateLimit = (connection: ExtendedWS, roomId: string, action: stri
     }
 
     const now = Date.now();
+    const actionKey = `${userId}:${action}`;
 
     // Initialize map for room if it doesn't exist
     if (!roomRateLimits.has(roomId)) {
@@ -206,17 +256,10 @@ const checkRoomRateLimit = (connection: ExtendedWS, roomId: string, action: stri
     }
     const roomLimits = roomRateLimits.get(roomId)!;
 
-    // Clean up expired limits
-    for (const [actionKey, limit] of roomLimits.entries()) {
-        if (now > limit.resetTime) {
-            roomLimits.delete(actionKey);
-        }
-    }
-
-    const actionLimit = roomLimits.get(action);
+    const actionLimit = roomLimits.get(actionKey);
 
     if (!actionLimit || now > actionLimit.resetTime) {
-        roomLimits.set(action, { count: 1, resetTime: now + windowMs });
+        roomLimits.set(actionKey, { count: 1, resetTime: now + windowMs });
         return true;
     }
 
@@ -397,8 +440,17 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
             switch (type) {
                 case 'create_room': {
-                    const { name, type = 'GROUP', description } = payload as chatModel.CreateRoomPayload;
-                    
+                    const { name, type = 'GROUP', userId, description } = payload as chatModel.CreateRoomPayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Unauthorized: User ID mismatch'
+                        }));
+                        return;
+                    }
+
                     // Validate room name
                     if (!name || name.trim().length === 0) {
                         connection.send(JSON.stringify({
@@ -427,45 +479,49 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     try {
                         const sanitizedName = escapeHtml(name.trim());
-                        const sanitizedDescription = description ? escapeHtml(description.trim()) : null;
+                        // const sanitizedDescription = description ? escapeHtml(description.trim()) : null;
 
-                        // Create the room
-                        const newRoom = await prisma.room.create({
-                            data: {
-                                name: sanitizedName,
-                                type,
-                                // description: sanitizedDescription,
-                            }
-                        });
+                        // Use a transaction to ensure atomicity: with transaction Both operations succeed together OR both fail together
+                        const txResult = await prisma.$transaction(async (tx) => {
+                            // Create the room
+                            const newRoom = await tx.room.create({
+                                data: {
+                                    name: sanitizedName,
+                                    type,
+                                    // description: sanitizedDescription,
+                                }
+                            });
 
-                        // Add creator as OWNER
-                        await prisma.roomMember.create({
-                            data: {
-                                userId: authUser.id,
-                                roomId: newRoom.id,
-                                role: 'OWNER'
-                            }
+                            // Add creator as OWNER in the same transaction
+                            await tx.roomMember.create({
+                                data: {
+                                    userId: authUser.id,
+                                    roomId: newRoom.id,
+                                    role: 'OWNER'
+                                }
+                            });
+                            return newRoom;
                         });
 
                         // Initialize live connections for this room
-                        liveConnections[newRoom.id] = new Set();
-                        liveConnections[newRoom.id]?.add(connection);
+                        liveConnections[txResult.id] = new Set();
+                        liveConnections[txResult.id]?.add(connection);
 
                         if (!connection.userData) {
                             connection.userData = { userId: authUser.id, rooms: new Set() };
                         }
-                        connection.userData.rooms.add(newRoom.id);
+                        connection.userData.rooms.add(txResult.id);
 
                         // Send success response
                         connection.send(JSON.stringify({
                             type: 'room_created',
                             payload: {
                                 room: {
-                                    id: newRoom.id,
-                                    name: newRoom.name,
-                                    type: newRoom.type,
-                                    // description: newRoom.description,
-                                    createdAt: newRoom.createdAt,
+                                    id: txResult.id,
+                                    name: txResult.name,
+                                    type: txResult.type,
+                                    // description: txResult.description,
+                                    createdAt: txResult.createdAt,
                                     createdBy: authUser.id
                                 },
                                 userRole: 'OWNER'
@@ -631,7 +687,16 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         }));
                         return;
                     }
-                    const { roomId } = payload as { roomId: string }
+                    const { roomId, userId } = payload as chatModel.DeleteRoomPayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
 
                     // Step 1: Check if room exists
                     const room = await prisma.room.findUnique({
@@ -686,11 +751,20 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'get_room_members': {
-                    const { roomId } = payload as chatModel.GetRoomMembersPayload;
+                    const { roomId, userId } = payload as chatModel.GetRoomMembersPayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
 
                     try {
                         const [roomMember, members] = await Promise.all([
-                            await prisma.roomMember.findUnique({
+                            prisma.roomMember.findUnique({
                                 where: {
                                     userId_roomId: {
                                         userId: authUser.id,
@@ -758,7 +832,16 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'kick_member': {
-                    const { roomId, targetUserId } = payload as chatModel.KickMemberPayload;
+                    const { roomId, userId, targetUserId } = payload as chatModel.KickMemberPayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
 
                     // Room-specific rate limiting for kick actions
                     if (!checkRoomRateLimit(connection, roomId, 'kick', 2, 60000)) { // 2 kicks per room per minute
@@ -902,7 +985,16 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         }));
                         return;
                     }
-                    const { roomId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
+                    const { roomId, userId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
 
                     // Validate new role
                     const validRoles = ['MEMBER', 'ADMIN', 'OWNER'];
@@ -1076,9 +1168,10 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const { roomId, senderId, text } = payload as chatModel.SendMessagePayload;
 
                     if (authUser.id !== senderId) {
+                        request.log.warn({ type, senderId, authUserId: authUser.id }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
-                            message: 'Unauthorized: Cannot send message as another user' 
+                            message: 'Unauthorized: User ID mismatch' 
                         }));
                         return;
                     }
@@ -1172,7 +1265,16 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'get_messages': {
-                    const { roomId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
+                    const { roomId, userId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
 
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
@@ -1213,7 +1315,16 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'get_more_messages': {
-                    const { roomId, limit = 10, reset = false } = payload as chatModel.GetMessagePayload;
+                    const { roomId, userId, limit = 10, reset = false } = payload as chatModel.GetMoreMessagesPayload;
+
+                    if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                        connection.send(JSON.stringify({ 
+                            type: 'error', 
+                            message: 'Unauthorized: User ID mismatch' 
+                        }));
+                        return;
+                    }
 
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
@@ -1300,9 +1411,10 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const { senderId, receiverId, text } = payload as chatModel.DirectMessagePayload;
 
                     if (authUser.id !== senderId) {
+                        request.log.warn({ type, senderId, authUserId: authUser.id }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
-                            message: 'Unauthorized: Cannot send message as another user' 
+                            message: 'Unauthorized: User ID mismatch' 
                         }));
                         return;
                     }
@@ -1378,9 +1490,10 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     // Verify user is authenticated and matches
                     if (authUser.id !== userId) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
-                            message: 'Unauthorized: Cannot edit message as another user'
+                            message: 'Unauthorized: User ID mismatch'
                         }));
                         return ;
                     }
@@ -1547,6 +1660,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     const { messageId, userId } = payload as { messageId: string, userId: string };
                     if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: Cannot delete message as another user'
@@ -1630,6 +1744,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'update_status': {
                     const { userId, status } = payload as chatModel.UpdateUserStatusPayload;
                     if (userId !== authUser.id) {
+                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: User ID mismatch'
@@ -1777,11 +1892,25 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         // Step 1: Clean up rateLimits for this connection
         const userId = connection.authenticatedUser?.id;
         if (userId) {
+            // Remove user-specific global rate limits
             rateLimits.delete(userId);
-            // Clean up roomRateLimits for all rooms this user is in
+
+            // Clean up user-specific room rate limits
             if (connection.userData?.rooms) {
                 connection.userData.rooms.forEach((roomId) => {
-                    roomRateLimits.delete(roomId);
+                    const roomLimits = roomRateLimits.get(roomId);
+                    if (roomLimits) {
+                        // Delete only entries for this user
+                        roomLimits.forEach((_, actionKey) => {
+                            if (actionKey.startsWith(`${userId}:`)) {
+                                roomLimits.delete(actionKey);
+                            }
+                        });
+                        // If no rate limits remain for the room, remove the room entry
+                        if (roomLimits.size === 0) {
+                            roomRateLimits.delete(roomId);
+                        }
+                    }
                 });
             }
         }
@@ -1796,7 +1925,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
             }
         }
-        
+
         // Step 3: Clean up client offsets tracking
         clientOffsets.delete(connection);
 
@@ -1819,11 +1948,29 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
 // Cleanup on process exit
 process.on('SIGINT', () => {
+    console.log('Shutting down gracefully...');
     clearInterval(cleanupInterval);
+    clearInterval(rateLimitCleanupInterval);
+    clearInterval(roomRateLimitCleanupInterval);
+    
+    // Final cleanup
+    rateLimits.clear();
+    roomRateLimits.clear();
+    clientOffsets.clear();
+    
     process.exit(0);
 });
 
 process.on('SIGTERM', () => {
+    console.log('Received SIGTERM, shutting down gracefully...');
     clearInterval(cleanupInterval);
+    clearInterval(rateLimitCleanupInterval);
+    clearInterval(roomRateLimitCleanupInterval);
+    
+    // Final cleanup
+    rateLimits.clear();
+    roomRateLimits.clear();
+    clientOffsets.clear();
+    
     process.exit(0);
 });

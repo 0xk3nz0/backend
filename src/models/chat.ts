@@ -1,5 +1,95 @@
 
 
+export interface CreateRoomPayload {
+    userId: string;
+    name: string;
+    type?: 'DIRECT' | 'GROUP';
+    description?: string | null;
+}
+
+export interface DeleteRoomPayload {
+    userId: string;
+    roomId: string;
+}
+
+export interface GetRoomMembersPayload {
+    userId: string;
+    roomId: string;
+}
+
+export interface GetMessagePayload {
+    userId: string;
+    roomId: string;
+    limit?: number;
+    offset?: number;
+    reset?: number;
+}
+
+export interface GetMoreMessagesPayload {
+    userId: string;
+    roomId: string;
+    limit?: number;
+    reset?: boolean;
+}
+
+export interface KickMemberPayload {
+    userId: string;
+    roomId: string;
+    targetUserId: string;
+}
+
+export interface PromoteMemberPayload {
+    userId: string;
+    roomId: string;
+    targetUserId: string;
+    newRole: 'MEMBER' | 'ADMIN' | 'OWNER';
+}
+
+export interface JoinRoomPayload {
+    userId: string;
+    roomId: string;
+}
+
+export interface LeaveRoomPayload {
+    userId: string;
+    roomId: string;
+}
+
+export interface SendMessagePayload {
+    senderId: string;
+    roomId: string;
+    text: string;
+}
+
+export interface DirectMessagePayload {
+    senderId: string;
+    receiverId: string;
+    text: string;
+}
+
+export interface EditMessagePayload {
+    userId: string;
+    messageId: string;
+    newText: string;
+}
+
+export interface DeleteMessagePayload {
+    userId: string;
+    messageId: string;
+}
+
+export interface UpdateUserStatusPayload {
+    userId: string;
+    status: 'IN_GAME' | 'OFFLINE' | 'ONLINE' | 'BUSY';
+}
+
+export interface TypingPayload {
+    userId: string;
+    status: boolean;
+    roomId?: string;
+    receiverId?: string;
+}
+
 export interface CreateMessageBody {
     senderId: string;
     content: string;
@@ -15,72 +105,19 @@ export interface GetMessageQuery {
     offset?: number;
 }
 
-export interface JoinRoomPayload {
-    roomId: string;
-    userId: string;
-}
-
-export interface LeaveRoomPayload {
-    roomId: string;
-    userId: string;
-}
-
-export interface SendMessagePayload {
-    roomId: string;
+export interface CreateMessageBody {
     senderId: string;
-    text: string;
-}
-
-export interface GetMessagePayload {
-    roomId: string;
-    limit?: number;
-    offset?: number;
-    reset?: number
-}
-
-export interface DirectMessagePayload {
-    senderId: string;
-    receiverId: string;
-    text: string;
-}
-
-export interface TypingPayload {
-    userId: string;
+    content: string;
     roomId?: string;
     receiverId?: string;
-    status: boolean;
 }
 
-export interface GetRoomMembersPayload {
-    roomId: string;
-}
-
-export interface KickMemberPayload {
-    roomId: string;
-    targetUserId: string;
-}
-
-export interface PromoteMemberPayload {
-    roomId: string;
-    targetUserId: string;
-    newRole: 'MEMBER' | 'ADMIN' | 'OWNER';
-}
-
-export interface CreateRoomPayload {
-    name: string;
-    type?: 'DIRECT' | 'GROUP'; // | 'CHANNEL';
-    description?: string;
-}
-
-export interface UpdateUserStatusPayload {
-    userId: string;
-    status: 'ONLINE' | 'BUSY' | 'IN_GAME' | 'OFFLINE'; // 'AWAY'
-}
-
-export interface EditMessagePayload {
-    messageId: string,
-    newText: string,
-    userId: string
+export interface GetMessageQuery {
+    roomId?: string;
+    senderId?: string;
+    receiverId?: string;
+    limit?: number;
+    offset?: number;
 }
 
 export type WSMessageType =

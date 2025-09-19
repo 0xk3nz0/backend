@@ -188,50 +188,6 @@ export const chatSchema = {
             additionalProperties: 'No extra properties allowed',
         }
     },
-    get_messages: {
-        type: 'object',
-        required: ['roomId'],
-        properties: {
-            roomId: { type: 'string', format: 'uuid' },
-            limit: { type: 'number', minimum: 1, maximum: 100, default: 50 },
-            offset: { type: 'number', minimum: 0, default: 0 },
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                roomId: 'roomId is required',
-            },
-            properties: {
-                roomId: 'roomId must be a valid UUID string',
-                limit: 'limit must be a number between 1 and 100',
-                offset: 'offset must be a non-negative number',
-            },
-            additionalProperties: 'No extra properties allowed',
-        }
-    },
-    get_more_messages: {
-        type: 'object',
-        required: ['roomId'],
-        properties: {
-            roomId: { type: 'string', format: 'uuid' },
-            limit: { type: 'number', minimum: 1, maximum: 100, default: 50 },
-            offset: { type: 'number', minimum: 0, default: 0 },
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                roomId: 'roomId is required',
-            },
-            properties: {
-                roomId: 'roomId must be a valid UUID string',
-                limit: 'limit must be a number between 1 and 100',
-                offset: 'offset must be a non-negative number',
-            },
-            additionalProperties: 'No extra properties allowed',
-        }
-    },
     send_direct_message: {
         type: 'object',
         required: ['senderId', 'receiverId', 'text'],
@@ -256,119 +212,13 @@ export const chatSchema = {
             additionalProperties: 'No extra properties allowed',
         }
     },
-    delete_message: {
-        type: 'object',
-        required: ['messageId', 'userId'],
-        properties: {
-            messageId: { type: 'string', format: 'uuid' },
-            userId: { type: 'string', format: 'uuid' }
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                messageId: 'messageId is required',
-                userId: 'userId is required'
-            },
-            properties: {
-                messageId: 'messageId must be a valid UUID string',
-                userId: 'userId must be a valid UUID string'
-            },
-            additionalProperties: 'No extra properties allowed'
-        }
-    },
-    get_room_members: {
-        type: 'object',
-        required: ['roomId'],
-        properties: {
-            roomId: { type: 'string', format: 'uuid' }
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                roomId: 'roomId is required'
-            },
-            properties: {
-                roomId: 'roomId must be a valid UUID string'
-            },
-            additionalProperties: 'No extra properties allowed'
-        }
-    },
-    kick_member: {
-        type: 'object',
-        required: ['roomId', 'targetUserId'],
-        properties: {
-            roomId: { type: 'string', format: 'uuid' },
-            targetUserId: { type: 'string', format: 'uuid' }
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                roomId: 'roomId is required',
-                targetUserId: 'targetUserId is required'
-            },
-            properties: {
-                roomId: 'roomId must be a valid UUID string',
-                targetUserId: 'targetUserId must be a valid UUID string'
-            },
-            additionalProperties: 'No extra properties allowed'
-        }
-    },
-    promote_member: {
-        type: 'object',
-        required: ['roomId', 'targetUserId', 'newRole'],
-        properties: {
-            roomId: { type: 'string', format: 'uuid' },
-            targetUserId: { type: 'string', format: 'uuid' },
-            newRole: { type: 'string', enum: ['MEMBER', 'ADMIN', 'OWNER'] }
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                roomId: 'roomId is required',
-                targetUserId: 'targetUserId is required',
-                newRole: 'newRole is required'
-            },
-            properties: {
-                roomId: 'roomId must be a valid UUID string',
-                targetUserId: 'targetUserId must be a valid UUID string',
-                newRole: 'newRole must be one of: MEMBER, ADMIN, OWNER'
-            },
-            additionalProperties: 'No extra properties allowed'
-        }
-    },
-    create_room: {
-        type: 'object',
-        required: ['name'],
-        properties: {
-            name: { type: 'string', minLength: 1, maxLength: CONFIG.ROOM.MAX_NAME_LENGTH },
-            type: { type: 'string', enum: ['GROUP', 'DIRECT'], default: 'GROUP' },
-            description: { type: 'string', maxLength: 1000 }
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                name: 'name is required'
-            },
-            properties: {
-                name: `name must be a string between 1 and ${CONFIG.ROOM.MAX_NAME_LENGTH} characters`,
-                type: 'type must be one of: GROUP, DIRECT',
-                description: 'description must be a string up to 1000 characters'
-            },
-            additionalProperties: 'No extra properties allowed'
-        }
-    },
     edit_message: {
         type: 'object',
         required: ['messageId', 'newText', 'userId'],
         properties: {
             messageId: { type: 'string', format: 'uuid' },
             newText: { type: 'string', minLength: 1, maxLength: CONFIG.MESSAGE.MAX_LENGTH },
-            userId: { type: 'string', format: 'uuid' }
+            userId: { type: 'string', format: 'uuid' },
         },
         additionalProperties: false,
         errorMessage: {
@@ -376,14 +226,35 @@ export const chatSchema = {
             required: {
                 messageId: 'messageId is required',
                 newText: 'newText is required',
-                userId: 'userId is required'
+                userId: 'userId is required',
             },
             properties: {
                 messageId: 'messageId must be a valid UUID string',
                 newText: `newText must be a string between 1 and ${CONFIG.MESSAGE.MAX_LENGTH} characters`,
-                userId: 'userId must be a valid UUID string'
+                userId: 'userId must be a valid UUID string',
             },
-            additionalProperties: 'No extra properties allowed'
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    delete_message: {
+        type: 'object',
+        required: ['messageId', 'userId'],
+        properties: {
+            messageId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                messageId: 'messageId is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                messageId: 'messageId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+            },
+            additionalProperties: 'No extra properties allowed',
         }
     },
     update_status: {
@@ -391,38 +262,20 @@ export const chatSchema = {
         required: ['userId', 'status'],
         properties: {
             userId: { type: 'string', format: 'uuid' },
-            status: { type: 'string', enum: ['IN_GAME', 'OFFLINE', 'ONLINE', 'BUSY'] }
+            status: { type: 'string', enum: ['IN_GAME', 'OFFLINE', 'ONLINE', 'BUSY'] },
         },
         additionalProperties: false,
         errorMessage: {
             type: 'Payload must be an object',
             required: {
                 userId: 'userId is required',
-                status: 'status is required'
+                status: 'status is required',
             },
             properties: {
                 userId: 'userId must be a valid UUID string',
-                status: 'status must be one of: IN_GAME, OFFLINE, ONLINE, BUSY'
+                status: 'status must be one of: IN_GAME, OFFLINE, ONLINE, BUSY',
             },
-            additionalProperties: 'No extra properties allowed'
-        }
-    },
-    delete_room: {
-        type: 'object',
-        required: ['roomId'],
-        properties: {
-            roomId: { type: 'string', format: 'uuid' }
-        },
-        additionalProperties: false,
-        errorMessage: {
-            type: 'Payload must be an object',
-            required: {
-                roomId: 'roomId is required'
-            },
-            properties: {
-                roomId: 'roomId must be a valid UUID string'
-            },
-            additionalProperties: 'No extra properties allowed'
+            additionalProperties: 'No extra properties allowed',
         }
     },
     typing: {
@@ -442,17 +295,185 @@ export const chatSchema = {
             type: 'Payload must be an object',
             required: {
                 userId: 'userId is required',
-                status: 'status is required'
+                status: 'status is required',
             },
             properties: {
                 userId: 'userId must be a valid UUID string',
                 status: 'status must be a boolean',
                 roomId: 'roomId must be a valid UUID string',
-                receiverId: 'receiverId must be a valid UUID string'
+                receiverId: 'receiverId must be a valid UUID string',
             },
             oneOf: 'You must provide either a roomId or a receiverId (but not both).',
             additionalProperties: 'No extra properties allowed',
         },
         additionalProperties: false,
+    },
+    create_room: {
+        type: 'object',
+        required: ['name', 'userId'],
+        properties: {
+            userId: { type: 'string', format: 'uuid' },
+            name: { type: 'string', minLength: 1, maxLength: CONFIG.ROOM.MAX_NAME_LENGTH },
+            type: { type: 'string', enum: ['GROUP', 'DIRECT'], default: 'GROUP' },
+            description: { type: 'string', maxLength: 1000, nullable: true },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                name: 'name is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                userId: 'userId must be a valid UUID string',
+                name: `name must be a string between 1 and ${CONFIG.ROOM.MAX_NAME_LENGTH} characters`,
+                type: 'type must be one of: GROUP, DIRECT',
+                description: 'description must be a string up to 1000 characters',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    delete_room: {
+        type: 'object',
+        required: ['roomId', 'userId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    get_room_members: {
+        type: 'object',
+        required: ['roomId', 'userId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    get_messages: {
+        type: 'object',
+        required: ['roomId', 'userId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+            offset: { type: 'integer', minimum: 0, default: 0 },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+                limit: 'limit must be an integer between 1 and 100',
+                offset: 'offset must be a non-negative integer',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    get_more_messages: {
+        type: 'object',
+        required: ['roomId', 'userId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+            reset: { type: 'boolean', default: false },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+                limit: 'limit must be an integer between 1 and 100',
+                reset: 'reset must be a boolean',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    kick_member: {
+        type: 'object',
+        required: ['roomId', 'targetUserId', 'userId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+            targetUserId: { type: 'string', format: 'uuid' },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+                targetUserId: 'targetUserId is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+                targetUserId: 'targetUserId must be a valid UUID string',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
+    },
+    promote_member: {
+        type: 'object',
+        required: ['roomId', 'targetUserId', 'newRole', 'userId'],
+        properties: {
+            roomId: { type: 'string', format: 'uuid' },
+            userId: { type: 'string', format: 'uuid' },
+            targetUserId: { type: 'string', format: 'uuid' },
+            newRole: { type: 'string', enum: ['MEMBER', 'ADMIN', 'OWNER'] },
+        },
+        additionalProperties: false,
+        errorMessage: {
+            type: 'Payload must be an object',
+            required: {
+                roomId: 'roomId is required',
+                userId: 'userId is required',
+                targetUserId: 'targetUserId is required',
+                newRole: 'newRole is required',
+            },
+            properties: {
+                roomId: 'roomId must be a valid UUID string',
+                userId: 'userId must be a valid UUID string',
+                targetUserId: 'targetUserId must be a valid UUID string',
+                newRole: 'newRole must be one of: MEMBER, ADMIN, OWNER',
+            },
+            additionalProperties: 'No extra properties allowed',
+        }
     },
 };
