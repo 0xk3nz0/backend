@@ -167,7 +167,7 @@ const cleanupExpiredRateLimits = () => {
 }
 
 // Start rate limit cleanup interval (every 5 minutes)
-const rateLimitCleanupInterval = setInterval(cleanupExpiredRateLimits, 5 * 60 * 1000);
+const rateLimitCleanupInterval = setInterval(cleanupExpiredRateLimits, CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES * 60 * 1000);
 
 // Check if a connection is within rate limits
 // 🔐 JWT Authentication: All sensitive operations require valid JWT tokens
@@ -239,7 +239,7 @@ const cleanupExpiredRoomRateLimits = () => {
 };
 
 // Schedule room rate limit cleanup
-const roomRateLimitCleanupInterval = setInterval(cleanupExpiredRoomRateLimits, 5 * 60 * 1000);
+const roomRateLimitCleanupInterval = setInterval(cleanupExpiredRoomRateLimits, CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES * 60 * 1000);
 
 const checkRoomRateLimit = (connection: ExtendedWS, roomId: string, action: string, maxRequests = 3, windowMs = 60000) => {
     const userId = connection.authenticatedUser?.id;
@@ -286,7 +286,7 @@ const CLIENT_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
 // Cleanup function for client offsets
 const cleanupClientOffsets = () => {
     const now = Date.now();
-    const maxAge = 30 * 60 * 1000; // 30 minutes
+    const maxAge = CONFIG.CLEANUP.CLIENT_OFFSETS_MAX_AGE_MINUTES * 60 * 1000; // 30 minutes
 
     let removedCount = 0;
     for (const [connection, data] of clientOffsets.entries()) {
@@ -1548,7 +1548,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     // Check if message is too old to edit (e.g., 24 hours)
                     const messageAge = Date.now() - message.createdAt.getTime();
-                    const maxEditAge = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+                    const maxEditAge = CONFIG.MESSAGE.EDIT_WINDOW_HOURS * 60 * 60 * 1000;
                     if (messageAge > maxEditAge) {
                         connection.send(JSON.stringify({
                             type: 'error',
@@ -1794,7 +1794,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'typing': {
-                    if(!checkRateLimit(connection, 5, 10000)) {
+                    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.TYPING_PER_10_SECONDS, 10000)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
