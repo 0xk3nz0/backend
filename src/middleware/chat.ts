@@ -33,7 +33,7 @@ export const authenticateWebSocketToken = async (
         const decoded = server.jwt.verify(cleanToken);
         
         // Validate token structure
-        if (!decoded || typeof decoded !== 'object' || !decoded.userId) {
+        if (!decoded || typeof decoded !== 'object' || !decoded.uid) {
             return { success: false, error: 'Invalid token payload' };
         }
         

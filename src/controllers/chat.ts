@@ -273,6 +273,7 @@ const checkRoomRateLimit = (connection: ExtendedWS, roomId: string, action: stri
 
 // exreact token from header
 function extractTokenFromHeaders(headers: any): string | null {
+    // const auth = headers.cookie;
     const auth = headers.authorization;
     return auth?.startsWith('Bearer') ? auth.slice(7) : null;
 }
@@ -430,7 +431,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         try {
 
             const authUser = connection.authenticatedUser;
-            if (!authUser || !authUser.id) {
+            if (!authUser || !authUser.uid) {
                 connection.send(JSON.stringify({
                     type: 'error',
                     message: 'User not authenticated'
@@ -442,8 +443,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'create_room': {
                     const { name, type = 'GROUP', userId, description } = payload as chatModel.CreateRoomPayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: User ID mismatch'
@@ -495,7 +496,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             // Add creator as OWNER in the same transaction
                             await tx.roomMember.create({
                                 data: {
-                                    userId: authUser.id,
+                                    userId: authUser.uid,
                                     roomId: newRoom.id,
                                     role: 'OWNER'
                                 }
@@ -508,7 +509,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         liveConnections[txResult.id]?.add(connection);
 
                         if (!connection.userData) {
-                            connection.userData = { userId: authUser.id, rooms: new Set() };
+                            connection.userData = { userId: authUser.uid, rooms: new Set() };
                         }
                         connection.userData.rooms.add(txResult.id);
 
@@ -522,7 +523,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                     type: txResult.type,
                                     // description: txResult.description,
                                     createdAt: txResult.createdAt,
-                                    createdBy: authUser.id
+                                    createdBy: authUser.uid
                                 },
                                 userRole: 'OWNER'
                             }
@@ -541,7 +542,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'join_room': {
                     const { roomId, userId } = payload as chatModel.JoinRoomPayload;
 
-                    if (authUser.id !== userId) {
+                    if (authUser.uid !== userId) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: User ID mismatch'
@@ -620,7 +621,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'leave_room': {
                     const { roomId, userId } = payload as chatModel.LeaveRoomPayload;
 
-                    if (authUser.id !== userId) {
+                    if (authUser.uid !== userId) {
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -689,8 +690,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
                     const { roomId, userId } = payload as chatModel.DeleteRoomPayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -712,7 +713,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     // Step 2: Check membership and ownership
                     const userMembership = await prisma.roomMember.findUnique({
-                        where: { userId_roomId: { userId: authUser.id, roomId } }
+                        where: { userId_roomId: { userId: authUser.uid, roomId } }
                     });
 
                     if (!userMembership || userMembership.role !== 'OWNER') {
@@ -753,8 +754,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'get_room_members': {
                     const { roomId, userId } = payload as chatModel.GetRoomMembersPayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -767,7 +768,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             prisma.roomMember.findUnique({
                                 where: {
                                     userId_roomId: {
-                                        userId: authUser.id,
+                                        userId: authUser.uid,
                                         roomId
                                     }
                                 }
@@ -834,8 +835,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'kick_member': {
                     const { roomId, userId, targetUserId } = payload as chatModel.KickMemberPayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -865,7 +866,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const userMembership = await prisma.roomMember.findUnique({
                         where: {
                             userId_roomId: {
-                                userId: authUser.id,
+                                userId: authUser.uid,
                                 roomId
                             }
                         }
@@ -888,7 +889,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // Can't kick yourself
-                    if (authUser.id === targetUserId) {
+                    if (authUser.uid === targetUserId) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Cannot kick yourself'
@@ -940,7 +941,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                 type: 'kicked_from_room',
                                 payload: {
                                     roomId,
-                                    kickedBy: authUser.id,
+                                    kickedBy: authUser.uid,
                                     reason: 'You have been removed from this room'
                                 }
                             }));
@@ -960,7 +961,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                 payload: {
                                     roomId,
                                     kickedUserId: targetUserId,
-                                    kickedBy: authUser.id
+                                    kickedBy: authUser.uid
                                 }
                             }));
                         }
@@ -987,8 +988,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
                     const { roomId, userId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -1009,7 +1010,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const userMembership = await prisma.roomMember.findUnique({
                         where: {
                             userId_roomId: {
-                                userId: authUser.id,
+                                userId: authUser.uid,
                                 roomId
                             }
                         }
@@ -1059,7 +1060,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // Can't change ur own role
-                    if (authUser.id === targetUserId) {
+                    if (authUser.uid === targetUserId) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Cannot change your own role'
@@ -1074,7 +1075,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             await prisma.roomMember.update({
                                 where: {
                                     userId_roomId: {
-                                        userId: authUser.id,
+                                        userId: authUser.uid,
                                         roomId
                                     }
                                 },
@@ -1106,7 +1107,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                         roomId,
                                         userId: targetUserId,
                                         newRole,
-                                        changedBy: authUser.id
+                                        changedBy: authUser.uid
                                     }
                                 }));
                             }
@@ -1122,7 +1123,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                         roomId,
                                         userId: targetUserId,
                                         newRole,
-                                        changedBy: authUser.id
+                                        changedBy: authUser.uid
                                     }
                                 }));
                             }
@@ -1167,8 +1168,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     const { roomId, senderId, text } = payload as chatModel.SendMessagePayload;
 
-                    if (authUser.id !== senderId) {
-                        request.log.warn({ type, senderId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (authUser.uid !== senderId) {
+                        request.log.warn({ type, senderId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -1197,7 +1198,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         const roomMember = await prisma.roomMember.findUnique({
                             where: {
                                 userId_roomId: {
-                                    userId: authUser.id,
+                                    userId: authUser.uid,
                                     roomId
                                 }
                             },
@@ -1267,8 +1268,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'get_messages': {
                     const { roomId, userId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -1279,7 +1280,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
                             userId_roomId: {
-                                userId: authUser.id,
+                                userId: authUser.uid,
                                 roomId
                             }
                         },
@@ -1317,8 +1318,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 case 'get_more_messages': {
                     const { roomId, userId, limit = 10, reset = false } = payload as chatModel.GetMoreMessagesPayload;
 
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -1329,7 +1330,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const roomMember = await prisma.roomMember.findUnique({
                         where: {
                             userId_roomId: {
-                                userId: authUser.id,
+                                userId: authUser.uid,
                                 roomId
                             }
                         }
@@ -1410,8 +1411,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     const { senderId, receiverId, text } = payload as chatModel.DirectMessagePayload;
 
-                    if (authUser.id !== senderId) {
-                        request.log.warn({ type, senderId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (authUser.uid !== senderId) {
+                        request.log.warn({ type, senderId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -1489,8 +1490,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     const { messageId, newText, userId } = payload as chatModel.EditMessagePayload;
 
                     // Verify user is authenticated and matches
-                    if (authUser.id !== userId) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (authUser.uid !== userId) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: User ID mismatch'
@@ -1518,7 +1519,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // Check if user is the message sender
-                    if (message.sender.id !== authUser.id) {
+                    if (message.sender.id !== authUser.uid) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: Can only edit your own messages'
@@ -1531,7 +1532,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         const roomMember = await prisma.roomMember.findUnique({
                             where: {
                                 userId_roomId: {
-                                    userId: authUser.id,
+                                    userId: authUser.uid,
                                     roomId: message.roomId
                                 }
                             }
@@ -1640,7 +1641,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             }
                         }));
                     } catch (error) {
-                        request.log.error({ error, messageId, userId: authUser.id }, 'Failed to edit message');
+                        request.log.error({ error, messageId, userId: authUser.uid }, 'Failed to edit message');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Failed to edit message'
@@ -1659,8 +1660,8 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     const { messageId, userId } = payload as { messageId: string, userId: string };
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: Cannot delete message as another user'
@@ -1680,7 +1681,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
-                    if(message.sender.id !== authUser.id) {
+                    if(message.sender.id !== authUser.uid) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: Can only delete your own messages'
@@ -1692,7 +1693,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         const roomMember = await prisma.roomMember.findUnique({
                             where: {
                                 userId_roomId: {
-                                    userId: authUser.id,
+                                    userId: authUser.uid,
                                     roomId: message.roomId
                                 }
                             }
@@ -1717,7 +1718,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                                     payload: {
                                         messageId,
                                         roomId: message.roomId,
-                                        deletedBy: authUser.id
+                                        deletedBy: authUser.uid
                                     }
                                 }));
                             }
@@ -1729,22 +1730,22 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                             if(ws.readyState === WS.OPEN) {
                                 ws.send(JSON.stringify({
                                     type: 'direct_message_deleted',
-                                    payload: { messageId, deletedBy: authUser.id }
+                                    payload: { messageId, deletedBy: authUser.uid }
                                 }));
                             }
                         });
                     }
                     connection.send(JSON.stringify({
                         type: 'message_delete_success',
-                        payload: { messageId, deletedBy: authUser.id }
+                        payload: { messageId, deletedBy: authUser.uid }
                     }));
                     break;
                 }
 
                 case 'update_status': {
                     const { userId, status } = payload as chatModel.UpdateUserStatusPayload;
-                    if (userId !== authUser.id) {
-                        request.log.warn({ type, userId, authUserId: authUser.id }, 'User ID mismatch attempt');
+                    if (userId !== authUser.uid) {
+                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Unauthorized: User ID mismatch'
@@ -1804,7 +1805,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
                     const { userId, status, roomId, receiverId } = payload as chatModel.TypingPayload;
 
-                    if (authUser.id !== userId) {
+                    if (authUser.uid !== userId) {
                         connection.send(JSON.stringify({ 
                             type: 'error', 
                             message: 'Unauthorized: User ID mismatch' 
@@ -1830,7 +1831,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         const roomMember = await prisma.roomMember.findUnique({
                             where: {
                                 userId_roomId: {
-                                    userId: authUser.id,
+                                    userId: authUser.uid,
                                     roomId
                                 }
                             }

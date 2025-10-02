@@ -97,6 +97,34 @@ export const userRegisterController = async (
 
 // ======  Lh4j Part  ====== //
 
+const rateLimits = new Map<string, { count: number, resetTime: number }>(); // key: userId
+
+const checkRateLimit = (userId: string | undefined, maxRequests = 10, windowMs = 60000) => {
+    if (!userId) {
+        return false;
+    }
+
+    const now = Date.now();
+    
+    // Get or create rate limit entry for this user
+    let rateLimit = rateLimits.get(userId);
+
+    // If no entry exists or the window has expired, create/reset it
+    if (!rateLimit || now > rateLimit.resetTime) {
+        rateLimits.set(userId, { count: 1, resetTime: now + windowMs });
+        return true;
+    }
+
+    // Check if user has exceeded the limit
+    if (rateLimit.count >= maxRequests) {
+        return false;
+    }
+
+    // Increment the counter
+    rateLimit.count++;
+    return true;
+};
+
 export const userLoginController = async (
     req: FastifyRequest<{ Body: UserLoginInput }>, rep: FastifyReply
 ): Promise<void> => {
@@ -120,8 +148,18 @@ export const userLoginController = async (
                 createdAt: user.createdAt
             };
 
+            if(!checkRateLimit(user.id, 2, 10000)) {
+                return rep.code(400).send({
+                    statusCode: 400,
+                    message: 'rate limit exeeded!'
+                });
+            }
+
             const token = req.jwt.sign(payload);
 
+            if (!token) {
+                fastify.log.error('token not signed!');
+            }
             rep.setCookie('access_token', token, {
                 path: '/',
                 httpOnly: true,
@@ -129,6 +167,8 @@ export const userLoginController = async (
             });
 
             rep.code(200).send({
+                uid: user.id,
+                message: 'login successfully',
                 access_token: token
             });
         } else {
