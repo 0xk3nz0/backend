@@ -1,0 +1,17 @@
+name: PR branch name check
+
+on:
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  enforce-feature-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch name
+        run: |
+          if [[ ! "${{ github.head_ref }}" =~ ^(feature/|merge/) ]]; then
+            echo "PRs to dev must come from feature/* or merge/* branches"
+            exit 1
+          fi

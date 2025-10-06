@@ -1,0 +1,37 @@
+### Get all
+GET http://localhost:3000/v1/user/ HTTP/1.1
+
+### Delete all
+
+DELETE  http://localhost:3000/v1/user/ HTTP/1.1
+
+
+### Create new user
+POST http://localhost:3000/v1/user/register HTTP/1.1
+Content-Type: application/json
+
+{
+    "name": "zizo",
+    "email": "ziz@zizo.com",
+    "password": "123asfas"
+}
+
+###
+POST http://localhost:3000/v1/user/register HTTP/1.1
+Content-Type: application/json
+
+{
+    "name": "lhaj",
+    "email": "cheb@lhaj.com",
+    "password": "lhaj123$$"
+}
+
+### Login to a user
+POST http://localhost:3000/v1/user/login HTTP/1.1
+Content-Type: application/json
+
+{
+    "name": "zizo",
+    "email": "ziz@zizo.com",
+    "password": "123asfas"
+}

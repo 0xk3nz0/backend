@@ -1,0 +1,173 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomType {
+  DIRECT
+  GROUP
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum UserStatus {
+  IN_GAME
+  OFFLINE
+  ONLINE
+  BUSY
+}
+
+
+/**
+ * Represents the state of a friend request between two users:
+ * - PENDING  → The request has been sent but not answered yet
+ * - ACCEPTED → The request was accepted, users are now friends
+ * - REJECTED → The request was declined
+ */
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+/**
+ * Represents a system user.
+ * Fields:
+ * - name      → Unique display name
+ * - email     → Unique email address
+ * - password  → User's hashed password
+ * - createdAt → Timestamp when the user was created
+ * - updatedAt → Timestamp of the last update
+ * - avatar    → URL or path to the user's avatar image
+ * - sentRequests     → Friend requests this user has sent
+ * - receivedRequests → Friend requests this user has received
+ */
+model User {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  avatar    String   @default("../public/images/default-avatar.jpg")
+
+  sentRequests     FriendRequest[] @relation("RequestSent")
+  receivedRequests FriendRequest[] @relation("RequestReceived")
+
+  blockedUsers   BlockedUser[] @relation("blocker")
+  blockedByUsers BlockedUser[] @relation("blocked")
+
+  secret        String?
+  refreshTokens RefreshToken[]
+  status        UserStatus @default(OFFLINE)
+  lastSeen      DateTime   @default(now())
+
+  sentMessages      Message[] @relation("MessageSender")
+  receivedMessages  Message[] @relation("MessageReceiver")
+  roomMembers       RoomMember[]
+
+  @@index([name, email])
+}
+
+/**
+ * Represents a friend request between two users.
+ * - requester → The user who sent the request
+ * - requested → The user who received the request
+ * - status    → Current state of the request (PENDING, ACCEPTED, REJECTED)
+ * - timestamp → Auto-set to the time the request was created
+ */
+model FriendRequest {
+  id          String              @id @default(uuid())
+  requester   User                @relation("RequestSent", fields: [requesterId], references: [id])
+  requested   User                @relation("RequestReceived", fields: [requestedId], references: [id])
+  status      FriendRequestStatus @default(PENDING)
+  timestamp   DateTime            @default(now())
+  requesterId String
+  requestedId String
+}
+
+/**
+ * Stores JWTs that have been invalidated before their natural expiry,
+ * - id → Auto-incrementing primary key.
+ * - token → The JWT string, must be unique.
+ * - expiresAt → Original expiration time of the token.
+ * - createdAt → Timestamp when the token was blacklisted.
+ */
+model BlacklistedToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model BlockedUser {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  timestamp DateTime @default(now())
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id])
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  isValid   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  expiredAt DateTime
+}
+model Room {
+  id        String @id @default(uuid())
+  name      String?
+  type      RoomType @default(GROUP)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages  Message[]
+  members   RoomMember[]
+}
+
+model RoomMember {
+  id        String @id @default(uuid())
+  userId    String
+  roomId    String
+  role      MemberRole @default(MEMBER)
+  joinedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  @@unique([userId, roomId])
+}
+
+model Message {
+  id          String @id @default(uuid())
+  content     String
+  senderId    String
+  receiverId  String?
+  roomId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sender    User @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver  User? @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  room      Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+}

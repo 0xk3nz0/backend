@@ -1,0 +1,13 @@
+### get profile
+GET http://localhost:3000/v1/user/profile HTTP/1.1
+Cookie: access_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI4NWFlNzUxYy0wMjgyLTRmYjItOWQ0MC1kZmVkY2ZjM2E5NDgiLCJuYW1lIjoieml6byIsImNyZWF0ZWRBdCI6IjIwMjUtMDktMDZUMDc6NTk6MzkuMzMzWiIsImlhdCI6MTc1NzE0NTYxM30.Qx6FwMQ46ukONxy36MnbgB2OH3b2sLr9n-vwuljnHy8
+
+### update profile
+PUT http://localhost:3000/v1/user/profile HTTP/1.1
+
+Content-Type: application/json
+
+{
+  "field": "avatar",
+  "value": "../public/images/default-avatar.jpg"
+}

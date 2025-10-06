@@ -1,0 +1,9 @@
+node_modules
+prisma/migrations
+prisma/pookie.db
+dist
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+*.log
