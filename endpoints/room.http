@@ -1,0 +1,58 @@
+### Create a room
+POST http://localhost:3000/v1/rooms HTTP/1.1
+Content-Type: application/json
+
+{
+    "creatorId": "81e3bf5c-0e52-48e5-8678-ec43070fdb6f",
+    "type": "DIRECT",
+    "members": [
+        { "userId": "66e099cd-e6e6-4b10-9649-59cf8e731941", "role": "MEMBER" }
+    ]
+}
+
+
+### Create message
+POST http://localhost:3000/v1/messages HTTP/1.1
+Content-Type: application/json
+
+{
+    "senderId": "81e3bf5c-0e52-48e5-8678-ec43070fdb6f",
+    "receiverId": "66e099cd-e6e6-4b10-9649-59cf8e731941",
+    "content": "lhaj sala l backend"
+}
+
+
+### Invalid senderId
+POST http://localhost:3000/v1/messages HTTP/1.1
+Content-Type: application/json
+
+{
+    "senderId": "81e3bf5c-0e52-48e5-8678-ec43070fdb6a",
+    "content": "hello"
+}
+
+
+### Get messages using pagination
+GET http://localhost:3000/v1/messages?roomId=b65e2477-98dc-4018-9cb5-850ce5d7fd7b&limit=50&offset=0
+
+### 
+GET http://localhost:3000/v1/messages?senderId=81e3bf5c-0e52-48e5-8678-ec43070fdb6f&receiverId=66e099cd-e6e6-4b10-9649-59cf8e731941&limit=50&offset=0
+
+
+HTTP/1.1 400 Bad Request
+content-type: application/json; charset=utf-8
+server: pong rush 1.0
+content-length: 196
+Date: Tue, 09 Sep 2025 16:48:56 GMT
+Connection: close
+
+{
+  "error": "Direct room already exist",
+  "room": {
+    "id": "b65e2477-98dc-4018-9cb5-850ce5d7fd7b",
+    "name": null,
+    "type": "DIRECT",
+    "createdAt": "2025-09-09T15:38:55.386Z",
+    "updatedAt": "2025-09-09T15:38:55.386Z"
+  }
+}
