@@ -24,11 +24,12 @@ export const CONFIG = {
         MESSAGES_PER_MINUTE: parseInt(process.env.RATE_LIMIT_MESSAGES || '10'),
         TYPING_PER_10_SECONDS: parseInt(process.env.RATE_LIMIT_TYPING || '5'),
         EDITS_PER_10_SECONDS: parseInt(process.env.RATE_LIMIT_EDITS || '5'),
+        PROMOTE_MEMBER: parseInt(process.env.RATE_LIMIT_PROMOTE || '5'),
     },
     CLEANUP: {
         CLIENT_OFFSETS_MAX: parseInt(process.env.MAX_CLIENT_OFFSETS || '1000'),
         CLIENT_OFFSETS_MAX_AGE_MINUTES: parseInt(process.env.CLIENT_OFFSETS_MAX_AGE || '30'),
-        CLEANUP_INTERVAL_MINUTES: parseInt(process.env.CLEANUP_INTERVAL || '5')
+        CLEANUP_INTERVAL_MINUTES: parseInt(process.env.CLEANUP_INTERVAL || '2')
     }
 } as const;
 
@@ -170,16 +171,16 @@ const cleanupExpiredRateLimits = () => {
 const rateLimitCleanupInterval = setInterval(cleanupExpiredRateLimits, CONFIG.CLEANUP.CLEANUP_INTERVAL_MINUTES * 60 * 1000);
 
 // Check if a connection is within rate limits
-// 🔐 JWT Authentication: All sensitive operations require valid JWT tokens
-// 🛡️ Authorization: Room membership verification before joining/messaging
-// ⚡ Enhanced Rate Limiting: Different limits per message type, tracked by user ID
-// 🧹 Content Sanitization: XSS prevention and message validation
-// 📊 Structured Error Handling: Consistent error responses with error codes
-// 📝 Comprehensive Logging: Detailed operation tracking for monitoring
-// ✅ Input Validation: Message length limits and spam detection
-// 🔒 Permission Checks: Users must have room access to perform actions
-const checkRateLimit = (connection: ExtendedWS, maxRequests = 10, windowMs = 60000) => {
-    const userId = connection.authenticatedUser?.id;
+// - JWT Authentication: All sensitive operations require valid JWT tokens
+// - Authorization: Room membership verification before joining/messaging
+// - Enhanced Rate Limiting: Different limits per message type, tracked by user ID
+// - Content Sanitization: XSS prevention and message validation
+// - Structured Error Handling: Consistent error responses with error codes
+// - Comprehensive Logging: Detailed operation tracking for monitoring
+// - Input Validation: Message length limits and spam detection
+// - Permission Checks: Users must have room access to perform actions
+const checkRateLimit = (connection: ExtendedWS, maxRequests = 10, windowMs = 60000) => { // default 10reqs/1min
+    const userId = connection.authenticatedUser?.uid;
     if (!userId) {
         return false;
     }
@@ -202,6 +203,9 @@ const checkRateLimit = (connection: ExtendedWS, maxRequests = 10, windowMs = 600
 
     // Increment the counter
     rateLimit.count++;
+    console.log(
+        `Request logged for userId=${userId}. Count=${rateLimit.count}/${maxRequests}`
+    );
     return true;
 };
 
@@ -368,6 +372,9 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         return ;
     }
 
+    const maxRequests = 10; // 10 req
+    const windowMs = 60000; // 60 sec
+
     // Store the authenticated user
     connection.authenticatedUser = authResult.user;
 
@@ -441,6 +448,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
             switch (type) {
                 case 'create_room': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { name, type = 'GROUP', userId, description } = payload as chatModel.CreateRoomPayload;
 
                     if (userId !== authUser.uid) {
@@ -468,7 +483,7 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         }));
                         return ;
                     }
-                    
+
                     const validTypes = ['DIRECT', 'GROUP']; // 'CHANNEL'
                     if (!validTypes.includes(type)) {
                         connection.send(JSON.stringify({
@@ -478,8 +493,25 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                         return ;
                     }
 
+                    
                     try {
                         const sanitizedName = escapeHtml(name.trim());
+                        
+                        const existingRoom = await prisma.room.findFirst({
+                            where: {
+                                name: sanitizedName,
+                                type: type
+                            }
+                        });
+
+                        if (existingRoom) {
+                            connection.send(JSON.stringify({
+                                type: 'error',
+                                message: 'Room with this name already exists'
+                            }));
+                            return ;
+                        }
+
                         // const sanitizedDescription = description ? escapeHtml(description.trim()) : null;
 
                         // Use a transaction to ensure atomicity: with transaction Both operations succeed together OR both fail together
@@ -540,6 +572,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'join_room': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { roomId, userId } = payload as chatModel.JoinRoomPayload;
 
                     if (authUser.uid !== userId) {
@@ -619,6 +659,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'leave_room': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { roomId, userId } = payload as chatModel.LeaveRoomPayload;
 
                     if (authUser.uid !== userId) {
@@ -681,11 +729,12 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'delete_room': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, 60000)) {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
                         }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
                         return;
                     }
                     const { roomId, userId } = payload as chatModel.DeleteRoomPayload;
@@ -752,6 +801,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'get_room_members': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { roomId, userId } = payload as chatModel.GetRoomMembersPayload;
 
                     if (userId !== authUser.uid) {
@@ -833,6 +890,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'kick_member': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { roomId, userId, targetUserId } = payload as chatModel.KickMemberPayload;
 
                     if (userId !== authUser.uid) {
@@ -845,20 +910,22 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                     }
 
                     // Room-specific rate limiting for kick actions
-                    if (!checkRoomRateLimit(connection, roomId, 'kick', 2, 60000)) { // 2 kicks per room per minute
+                    if (!checkRoomRateLimit(connection, roomId, 'kick', CONFIG.RATE_LIMITS.ROOM_KICKS_PER_MINUTE, windowMs)) { // 2 kicks per room per minute
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Room-specific rate limit exceeded for kick action'
                         }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ROOM_KICKS_PER_MINUTE} requests in ${windowMs / 1000}s`);
                         return;
                     }
 
                     // Check general rate limit
-                    if (!checkRateLimit(connection, 3, 60000)) { // 3 total admin actions per minute
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) { // 3 total admin actions per minute
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
                         }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
                         return;
                     }
 
@@ -979,11 +1046,12 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'promote_member': {
-                    if (!checkRateLimit(connection, 3, 60000)) { // 3 promotions per minute
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.PROMOTE_MEMBER, windowMs)) { // 3 promotions per minute
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
                         }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${maxRequests} requests in ${windowMs / 1000}s`);
                         return;
                     }
                     const { roomId, userId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
@@ -1158,11 +1226,12 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'send_message': {
-                    if (!checkRateLimit(connection)) {
+                    if (!checkRateLimit(connection, maxRequests, windowMs)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
                         }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${maxRequests} requests in ${windowMs / 1000}s`);
                         return ;
                     }
 
@@ -1266,6 +1335,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'get_messages': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { roomId, userId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
 
                     if (userId !== authUser.uid) {
@@ -1316,6 +1393,14 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'get_more_messages': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { roomId, userId, limit = 10, reset = false } = payload as chatModel.GetMoreMessagesPayload;
 
                     if (userId !== authUser.uid) {
@@ -1401,11 +1486,12 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'send_direct_message': {
-                    if (!checkRateLimit(connection)) {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.MESSAGES_PER_MINUTE, windowMs)) {
                         connection.send(JSON.stringify({
                             type: 'error',
                             message: 'Rate limit exceeded, please try again later'
                         }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.MESSAGES_PER_MINUTE} requests in ${windowMs / 1000}s`);
                         return ;
                     }
 
@@ -1743,7 +1829,16 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
                 }
 
                 case 'update_status': {
+                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+                        connection.send(JSON.stringify({
+                            type: 'error',
+                            message: 'Rate limit exceeded, please try again later'
+                        }));
+                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+                        return;
+                    }
                     const { userId, status } = payload as chatModel.UpdateUserStatusPayload;
+
                     if (userId !== authUser.uid) {
                         request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
                         connection.send(JSON.stringify({
