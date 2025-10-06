@@ -11,7 +11,7 @@ import UserRoutes from './routes/user.js';
 import FriendRoutes from './routes/friend.js';
 import AuthRoutes from './routes/auth.js';
 import TOTPRoutes from './routes/totp.js';
-import { chatRoom } from './routes/chat.js';
+import ChatRoutes from './routes/chat.js';
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 import {facebookOAuthOpts, googleOAuthOpts} from "./auth/clients.js";
@@ -43,7 +43,7 @@ const routes = [
         opt: { prefix: '/v1/auth' }
     },
     {
-        pcb: chatRoom,
+        pcb: ChatRoutes,
         opt: { prefix: '/v1' }
     }
 ]

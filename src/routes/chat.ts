@@ -4,7 +4,7 @@ import { createRoomHandler } from "../controllers/room.js"
 import { createMessageSchema, getMessageSchema } from "../schemas/chat.js"
 import { websocketHandler, createMessageHandler, getMessageHandler } from "../controllers/chat.js"
 
-export const chatRoom = (fastify: FastifyInstance, options: FastifyPluginOptions) => {
+export default (fastify: FastifyInstance, options: FastifyPluginOptions) => {
     fastify.post('/rooms', {
         schema: createRoomSchema,
         handler: createRoomHandler
