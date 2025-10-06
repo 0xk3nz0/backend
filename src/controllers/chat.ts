@@ -5,7 +5,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import * as chatModel from '../models/chat.js';
 import { chatSchema } from '../schemas/chat.js';
 import { prisma } from '../utils/prisma.js';
-import { wsValidators } from '../app.js';
+import { wsValidators } from '../server.js';
 import { WebSocket as WS } from 'ws';
 import process from 'process';
 

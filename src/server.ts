@@ -16,9 +16,17 @@ import type { ApplicationHook, LifecycleHook } from "fastify/types/hooks.js";
 import jwt from '@fastify/jwt';
 import fcors from '@fastify/cors';
 import fcookie from '@fastify/cookie';
-import rateLimit from "@fastify/rate-limit";
 import multipart from "@fastify/multipart";
+import websocket from "@fastify/websocket";
+import rateLimit from "@fastify/rate-limit";
 import oauth2, { type FastifyOAuth2Options } from '@fastify/oauth2';
+
+import addErrors from "ajv-errors";
+import addFormats from "ajv-formats";
+import Ajv2020 from "ajv/dist/2020.js";
+import type Ajv from 'ajv';
+
+import { chatSchema } from 'schemas/chat.js';
 
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
 import LoggingOpts from './utils/logger.js';
@@ -26,6 +34,8 @@ import LoggingOpts from './utils/logger.js';
 
 
 export const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
+
+export const wsValidators: Record<string, Ajv.ValidateFunction> = {};
 
 type FastifyHookName = ApplicationHook | LifecycleHook;
 
@@ -71,6 +81,7 @@ export default class Server {
     multipartFSize: number;
     swaggerOpts: FastifyPluginOptions;
     swaggerUIOpts: FastifyPluginOptions;
+    ajv: Ajv2020;
 
     constructor(
         host: string, port: number,
@@ -117,6 +128,9 @@ export default class Server {
             staticCSP: true,
             transformStaticCSP: (header: string): string => header,
         };
+        this.ajv = new Ajv2020({ allErrors: true });
+        addErrors(this.ajv);
+        addFormats(this.ajv);
     }
 
     private async connectPrismaClient(): Promise<void> {
@@ -149,6 +163,7 @@ export default class Server {
             await this.fastify.register(plugin);
         }
         await this.registerOAuthClients();
+        await fastify.register(websocket);
     }
 
     private registerRoutes(): void {
@@ -183,6 +198,43 @@ export default class Server {
         }
     }
 
+    private configureAJV(): void {
+        for (const [type, schema] of Object.entries(chatSchema)) {
+            wsValidators[type] = this.ajv.compile(schema as object);
+        }
+    }
+
+    /**
+     * Configures a custom JSON schema validator using AJV 2020-12 with enhanced features.
+     * 
+     * This validator supports:
+     * - All validation errors collection (not just first error)
+     * - Custom error messages via ajv-errors plugin
+     * - Format validation (UUID, email, date, etc.) via ajv-formats plugin
+     * 
+     * @param {Object} options - Validator compiler options
+     * @param {Object} options.schema - JSON schema to compile
+     * @returns {Function} Compiled validation function
+     * 
+     * @example
+     * // Schema with custom error and UUID format
+     * const schema = {
+     *   type: "object",
+     *   properties: {
+     *     id: { type: "string", format: "uuid" },
+     *     email: { type: "string", format: "email", errorMessage: "Invalid email format" }
+     *   }
+     * };
+     */
+    private setValidatorCompiler(): void {
+        this.fastify.setValidatorCompiler(({ schema }) => {
+            const ajv = new (Ajv2020 as any)({ allErrors: true });
+            (addErrors as any)(ajv); // Apply ajv-errors to the Ajv instance
+            (addFormats as any)(ajv); // Apply ajv-formats to support uuid, email, etc.
+            return ajv.compile(schema);
+        });
+    }
+
     private async start(): Promise<void> {
         try {
             await this.fastify.listen({
@@ -196,6 +248,8 @@ export default class Server {
     }
 
     public async run(): Promise<void> {
+        this.configureAJV();
+        this.setValidatorCompiler();
         await this.connectPrismaClient();
         this.addHooks();
         await this.registerPlugs();
