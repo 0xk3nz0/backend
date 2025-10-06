@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Check branch name
         run: |
-          if [[ ! "${{ github.head_ref }}" =~ ^feature/ ]]; then
-            echo "PRs to dev must come from feature/* branches"
+          if [[ ! "${{ github.head_ref }}" =~ ^(feature/|merge/) ]]; then
+            echo "PRs to dev must come from feature/* or merge/* branches"
             exit 1
           fi
