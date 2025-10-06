@@ -7,7 +7,7 @@ import type UserModel from "../models/user.js";
 import { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { UserRegisterInput, UserLoginInput, UserUpdateInput } from "../models/user.js";
 
-
+// ======  Heisenberg Part  ====== //
 
 const UPLOAD_DIR = "./public/images";
 
@@ -91,6 +91,41 @@ export const userRegisterController = async (
     });
 }
 
+// Chat handler
+// export const chatWebsocketHandler = async (webSocket: WebSocket, request: FastifyRequest) => {
+
+// }
+
+// ======  Lh4j Part  ====== //
+
+const rateLimits = new Map<string, { count: number, resetTime: number }>(); // key: userId
+
+const checkRateLimit = (userId: string | undefined, maxRequests = 10, windowMs = 60000) => {
+    if (!userId) {
+        return false;
+    }
+
+    const now = Date.now();
+    
+    // Get or create rate limit entry for this user
+    let rateLimit = rateLimits.get(userId);
+
+    // If no entry exists or the window has expired, create/reset it
+    if (!rateLimit || now > rateLimit.resetTime) {
+        rateLimits.set(userId, { count: 1, resetTime: now + windowMs });
+        return true;
+    }
+
+    // Check if user has exceeded the limit
+    if (rateLimit.count >= maxRequests) {
+        return false;
+    }
+
+    // Increment the counter
+    rateLimit.count++;
+    return true;
+};
+
 export const userLoginController = async (
     req: FastifyRequest<{ Body: UserLoginInput }>, rep: FastifyReply
 ): Promise<void> => {
@@ -141,11 +176,12 @@ export const userLoginController = async (
              *          or allowed to log-in in this case he will be offered
              *          a JWT with mfa_required set to false !
              */
-            token = req.jwt.sign({
+            const payload = {
                 uid: user.id,
                 createdAt: user.createdAt,
                 mfa_required: false
-            }, {
+            };
+            token = req.jwt.sign(payload, {
                 expiresIn: "15m"
             });
 
@@ -157,7 +193,18 @@ export const userLoginController = async (
                     expiredAt: new Date(Date.now() + 2592000000)
                 }
             });
+            if(!checkRateLimit(user.id, 2, 10000)) {
+                return rep.code(400).send({
+                    statusCode: 400,
+                    message: 'rate limit exeeded!'
+                });
+            }
 
+            token = req.jwt.sign(payload);
+
+            if (!token) {
+                fastify.log.error('token not signed!');
+            }
             rep.setCookie('access_token', token, {
                 path: '/',
                 httpOnly: true,
@@ -172,7 +219,9 @@ export const userLoginController = async (
 
             rep.code(200).send({
                 access_token: token,
-                refresh_token
+                refresh_token,
+                uid: user.id,
+                message: 'login successfully'
             });
         } else {
             rep.code(401).send({

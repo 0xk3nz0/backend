@@ -1,0 +1,30 @@
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+[remote "origin"]
+	url = git@github.com:iTsLhaj/backend.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "master"]
+	remote = origin
+	merge = refs/heads/master
+	vscode-merge-base = origin/master
+[branch "dev"]
+	remote = origin
+	vscode-merge-base = origin/dev
+	merge = refs/heads/dev
+[branch "feature/user-register"]
+	vscode-merge-base = origin/dev
+	remote = origin
+	merge = refs/heads/feature/user-register
+[pull]
+	rebase = false
+[branch "feature/jwt-auth"]
+	remote = origin
+	merge = refs/heads/feature/jwt-auth
+	vscode-merge-base = origin/feature/jwt-auth
+[branch "feature/upload"]
+	vscode-merge-base = origin/dev
+[branch "feature/chat-ws"]
+	vscode-merge-base = origin/dev

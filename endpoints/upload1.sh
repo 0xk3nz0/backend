@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ $# -ne 2 ]; then
+if [ $# -ne 1 ]; then
      echo -e "  -> Please provide the access token!"
      exit 13
 fi
