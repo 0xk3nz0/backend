@@ -29,8 +29,21 @@ COPY . .
 RUN npx prisma migrate dev --name init
 RUN npx prisma generate
 
+# FILEBEAT INSTALLATION
+RUN apk add --no-cache curl tar \
+    && FILEBEAT_VERSION=8.10.0 \
+    && curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-$FILEBEAT_VERSION-linux-x86_64.tar.gz \
+    && tar xzf filebeat-$FILEBEAT_VERSION-linux-x86_64.tar.gz \
+    && mv filebeat-$FILEBEAT_VERSION-linux-x86_64 /usr/share/filebeat \
+    && rm filebeat-$FILEBEAT_VERSION-linux-x86_64.tar.gz
+
+# Copy your Filebeat config
+COPY filebeat.yml /usr/share/filebeat/filebeat.yml
+
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Start Node app + Filebeat (background)
+CMD [ "sh", "-c", "/usr/share/filebeat/filebeat -c /usr/share/filebeat/filebeat.yml & npm start" ]
+
 # CMD ["sh", "-c", "npx prisma migrate dev && npm start"]
 # CMD [ "npx", "prisma", "migrate", "dev", "&&", "npm", "start" ]

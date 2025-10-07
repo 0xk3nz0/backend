@@ -1,0 +1,14 @@
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /app/logs/*.log
+
+output.consloe:
+  enabled: true
+
+# output.elasticsearch:
+  # enabled: true
+
+# output.logstash:
+  # enabled: true
