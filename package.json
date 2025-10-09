@@ -8,6 +8,7 @@
     "dev": "nodemon",
     "test": "vitest run --sequence.concurrent=false --silent 2> /dev/null",
     "db:migrate": "prisma migrate dev",
+    "db:reset": "prisma migrate reset",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio"
   },
