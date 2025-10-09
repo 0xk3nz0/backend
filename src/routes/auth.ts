@@ -4,7 +4,8 @@ import type {
 } from "fastify";
 import {
     facebookOAuthCallbackController,
-    googleOAuthCallbackController
+    intra42OAuthCallbackController,
+    googleOAuthCallbackController,
 } from "../controllers/auth.js";
 
 
@@ -22,6 +23,10 @@ import {
  */
 export default async (fastify: FastifyInstance, opts: FastifyPluginOptions): Promise<void> => {
 
+    fastify.get('/intra42/callback', {
+        schema: { tags: [ "oauth" ] },
+        handler: intra42OAuthCallbackController
+    });
     fastify.get('/google/callback', {
         schema: { tags: [ "oauth" ] },
         handler: googleOAuthCallbackController

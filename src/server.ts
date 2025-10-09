@@ -15,6 +15,7 @@ import type { ApplicationHook, LifecycleHook } from "fastify/types/hooks.js";
 
 import jwt from '@fastify/jwt';
 import fcors from '@fastify/cors';
+import helmet from "@fastify/helmet";
 import fcookie from '@fastify/cookie';
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
@@ -147,6 +148,7 @@ export default class Server {
     }
 
     private async registerPlugs(): Promise<void> {
+        await this.fastify.register(helmet);
         await this.fastify.register(fastifySwagger, this.swaggerOpts);
         await this.fastify.register(fastifySwaggerUi, this.swaggerUIOpts);
         await this.fastify.register(jwt, { secret: this.secrets.jwt });

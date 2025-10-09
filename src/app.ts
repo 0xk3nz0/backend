@@ -14,7 +14,7 @@ import TOTPRoutes from './routes/totp.js';
 import ChatRoutes from './routes/chat.js';
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
-import {facebookOAuthOpts, googleOAuthOpts} from "./auth/clients.js";
+import { intranet42OAuthOpts, facebookOAuthOpts, googleOAuthOpts } from "./auth/clients.js";
 import ServiceManagerPlugin from './plugins/service.js';
 
 const rateLimitingOpts = {
@@ -44,7 +44,7 @@ const routes = [
     },
     {
         pcb: ChatRoutes,
-        opt: { prefix: '/v1' }
+        opt: { prefix: '/v1/chat' }
     }
 ]
 
@@ -62,6 +62,7 @@ const secrets = {
 const app: Server = new Server(
     '0.0.0.0', 3000,
     [
+        intranet42OAuthOpts,
         googleOAuthOpts,
         facebookOAuthOpts
     ],

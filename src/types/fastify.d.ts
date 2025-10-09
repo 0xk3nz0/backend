@@ -9,6 +9,22 @@ declare module 'fastify' {
     interface FastifyInstance {
         service: ServiceManager;
         authentication_jwt: any;
+        intra42OAuth2: {
+            getAccessTokenFromAuthorizationCodeFlow(
+                request: FastifyRequest
+            ): Promise<{
+                token: {
+                   access_token: string
+                   refresh_token?: string
+                   token_type: string
+                   expires_in: number
+               }
+            }>;
+            generateAuthorizationUri(
+                req: FastifyRequest,
+                res: FastifyReply
+            ): string;
+        };
         googleOAuth2: {
             getAccessTokenFromAuthorizationCodeFlow(
                 request: FastifyRequest

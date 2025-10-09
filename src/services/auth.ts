@@ -15,6 +15,51 @@ import type { AuthServiceError_t } from "./user.js";
  * Implementation of the Google OAuth provider.
  * Handles token exchange and user info retrieval via Google's OAuth2 API.
  */
+class Intra42OAuthProvider implements OAuthProvider {
+
+    /**
+     * Retrieves an access token from Google using the authorization code flow.
+     *
+     * @param {FastifyRequest} req - The incoming Fastify request containing OAuth state and code.
+     * @returns {Promise<Token>} Resolves to a token object with expiration and type details.
+     * @throws {Error} If token retrieval fails.
+     */
+    async getAccessToken(req: FastifyRequest): Promise<Token> {
+        const { token } = await req.server
+            .intra42OAuth2
+            .getAccessTokenFromAuthorizationCodeFlow(req);
+        return {
+            ...token,
+            expires_at: new Date(Date.now() + token.expires_in * 1000),
+            token_type: "Bearer" as const
+        };
+    }
+
+    /**
+     * Fetches user profile information from Google APIs.
+     *
+     * @param {string} token - The OAuth2 access token.
+     * @returns {Promise<OAuthUserInfo>} Resolves with the user information object.
+     * @throws {Error} If fetching user info fails.
+     */
+    async getUserInfo(token: string): Promise<OAuthUserInfo> {
+        const response = await fetch('https://api.intra.42.fr/v2/me', {
+            headers: {
+                Authorization: `Bearer ${token}`
+            }
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to fetch 42 user info: ${response.statusText}`)
+        }
+        return await response.json();
+    }
+
+};
+
+/**
+ * Implementation of the Google OAuth provider.
+ * Handles token exchange and user info retrieval via Google's OAuth2 API.
+ */
 class GoogleOAuthProvider implements OAuthProvider {
 
     /**
@@ -143,6 +188,7 @@ export default class AuthService extends DataBaseWrapper {
         this.providers = {
             google: new GoogleOAuthProvider(),
             facebook: new FacebookOAuthProvider(),
+            intra42: new Intra42OAuthProvider(),
             /// ... add more providers
         };
     }

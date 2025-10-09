@@ -1,10 +1,40 @@
 import type { FastifyOAuth2Options } from "@fastify/oauth2";
 import {
     facebookOauthRedirectOpts,
-    googleOauthRedirectOpts
+    intra42OauthRedirectOpts,
+    googleOauthRedirectOpts,
 } from './consts.js';
 
 
+/**
+ * Intranet42 OAuth2 configuration for Fastify.
+ *
+ * @constant
+ * @type {FastifyOAuth2Options}
+ * @description
+ * Configuration object for Google OAuth2 authentication in Fastify.
+ * Includes client credentials, OAuth endpoints, redirect paths, and scopes.
+ *
+ * @see https://api.intra.42.fr/apidoc/
+ */
+export const intranet42OAuthOpts: FastifyOAuth2Options = {
+    name: 'intra42OAuth2',
+    credentials: {
+        client: {
+            id: process.env.INTRA42_UID!,
+            secret: process.env.INTRA42_SECRET!
+        },
+        auth: {
+            authorizeHost: 'https://api.intra.42.fr',
+            authorizePath: '/oauth/authorize',
+            tokenHost: 'https://api.intra.42.fr',
+            tokenPath: '/oauth/token'
+        }
+    },
+    startRedirectPath: intra42OauthRedirectOpts.redirectPath,
+    callbackUri: intra42OauthRedirectOpts.callbackUri,
+    scope: [ 'public' ]
+};
 
 /**
  * Google OAuth2 configuration for Fastify.

@@ -4,11 +4,11 @@ filebeat.inputs:
   paths:
     - /app/logs/*.log
 
-output.consloe:
+output.console:
   enabled: true
 
-# output.elasticsearch:
-  # enabled: true
-
-# output.logstash:
-  # enabled: true
+# Enable Logstash output
+output.logstash:
+  enabled: true
+  hosts: ["logstash:5044"]
+# logstash is the container name

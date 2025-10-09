@@ -13,7 +13,16 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { authHelper } from "../utils/auth.js";
 
+export const intra42OAuthCallbackController = async (
+    request: FastifyRequest, response: FastifyReply
+): Promise<void> => {
 
+    const token = await authHelper(request, response, 'intra42');
+    response.code(200).send({
+        access_token: token
+    });
+
+}
 
 export const googleOAuthCallbackController = async (
     req: FastifyRequest, res: FastifyReply

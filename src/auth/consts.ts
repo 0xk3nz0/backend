@@ -12,6 +12,19 @@ type clientOauthOpts = {
 };
 
 /**
+ * Intra42 OAuth redirect options.
+ *
+ * @constant
+ * @type {clientOauthOpts}
+ * @description
+ * Defines the start path and callback URI for Facebook OAuth2 authentication.
+ */
+export const intra42OauthRedirectOpts: clientOauthOpts = {
+    redirectPath: '/api/auth/42',
+    callbackUri: `${baseURL}/api/auth/42/callback`,
+};
+
+/**
  * Google OAuth redirect options.
  *
  * @constant
