@@ -1,6 +1,24 @@
+import type { FastifyRequest } from 'fastify';
 
+export async function handleGameWebSocket(connection: any, request: FastifyRequest) {
+  console.log('🟢 New WebSocket connection established');
 
+  connection.socket.on('message', (message: Buffer) => {
+    try {
+      const parsedMessage = JSON.parse(message.toString());
+      console.log('📩 Received message:', parsedMessage);
 
-export const createGameHandler = () => {
-    
+      if (parsedMessage.type === 'ping') {
+        connection.socket.send(JSON.stringify({ type: 'pong' }));
+      }
+
+    } catch (error) {
+      console.log('❌ Invalid message format');
+    }
+  });
+
+  connection.socket.send(JSON.stringify({
+    type: 'welcome',
+    message: 'Connected to game server'
+  }));
 }

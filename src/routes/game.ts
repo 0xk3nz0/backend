@@ -1,11 +1,13 @@
-import type { FastifyInstance, FastifyPluginOptions, FastifyRequest } from "fastify";
-import { createGameSchema } from "../schemas/game.js"
-import { createGameHandler } from "../controllers/game.js"
+import type { FastifyInstance, FastifyPluginOptions } from "fastify";
+import websocket from "@fastify/websocket";
+import { handleGameWebSocket } from "../controllers/game.js";
 
 export default (fastify: FastifyInstance, options: FastifyPluginOptions) => {
-    fastify.post('/game', {
-        schema: createGameSchema,
-        handler: createGameHandler
-    });
 
-}
+  fastify.register(websocket);
+
+  fastify.get('/ws/game', { websocket: true }, async (connection, request) => {
+    await handleGameWebSocket(connection, request);
+  });
+
+};
