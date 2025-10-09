@@ -52,12 +52,22 @@ export const authHelper = async (
         where: { email: user_info.email }
     });
     if (!user) {
-        req.server
-            .service
-            .user.throwErr({
-                code: 404,
-                message: 'user doesn\'t exist'
-            });
+        // return res.code(200).send(user_info);
+        token = await authService.authenticate(user_info);
+
+        res.setCookie('access_token', token, {
+            path: '/',
+            httpOnly: true,
+            secure: true
+        });
+
+        return token;
+        // req.server
+        //     .service
+        //     .user.throwErr({
+        //         code: 404,
+        //         message: 'user doesn\'t exist'
+        //     });
     }
     const user2faStatus = await req
         .server

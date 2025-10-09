@@ -252,7 +252,11 @@ export default class AuthService extends DataBaseWrapper {
      * @returns {Promise<string>} A signed JWT valid for one hour.
      * @throws {Error} If verification, registration, or JWT signing fails.
      */
-    public async authenticate(user_info: OAuthUserInfo): Promise<string> {
+    public async authenticate(user_info: OAuthUserInfo | any): Promise<string> {
+        if (user_info.usual_full_name) {
+            /// NOTE: if this was called by intra, it will have `usual_full_name` !
+            user_info = { ...user_info, name: user_info.usual_full_name }
+        }
         if (!(await this.verify(user_info))) {
             await this.register(user_info);
         }

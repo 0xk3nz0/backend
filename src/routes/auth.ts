@@ -23,7 +23,7 @@ import {
  */
 export default async (fastify: FastifyInstance, opts: FastifyPluginOptions): Promise<void> => {
 
-    fastify.get('/intra42/callback', {
+    fastify.get('/intra/callback', {
         schema: { tags: [ "oauth" ] },
         handler: intra42OAuthCallbackController
     });
