@@ -1,6 +1,6 @@
 
 
-export const gameSchema = {
+export const createGameSchema = {
     body: {
         type: 'object',
         
