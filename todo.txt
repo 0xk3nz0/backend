@@ -1,0 +1,79 @@
+// TODO 1: WebSocket endpoint for
+
+
+Add WebSocket route to your existing game routes
+
+Register /ws/game endpoint using @fastify/websocket
+
+This creates the WebSocket connection poi
+
+
+Create handleGameWebSocket(connection, request) function
+
+This function will handle new WebSocket connections
+
+Log when a player connects successful
+
+
+Extract JWT token from WebSocket request headers
+
+Use your existing auth system to validate the token
+
+Get user ID from the validated token
+
+Reject connection if token is inval
+
+
+Create a simple Map to track connections:
+
+activeConnections = { userId: websocketConnection }
+
+Add the connected user to this Map
+
+Remove user from Map when connection clos
+
+
+Set up message listener on the WebSocket
+
+Parse incoming JSON messages
+
+Log received messages for debugging
+
+Handle 'ping' messages with 'pong' respon
+
+
+Listen for WebSocket close events
+
+Remove user from activeConnections Map
+
+Log when a player disconnects
+
+Clean up any game sessions they were
+
+
+Test the WebSocket endpoint
+
+Connect to ws://localhost:3000/ws/game
+
+Send a simple {"type": "ping"} message
+
+Verify you get {"type": "pong"} ba
+
+
+
+
+
+// TODO 2: Player movement forwarding
+
+
+
+// TODO 3: Simple matchmaking queue
+// TODO 4: Bot opponent
+
+
+
+// TODO 5: Tournament creation
+// TODO 6: Tournament progression
+
+
+

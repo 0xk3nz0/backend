@@ -1,0 +1,24 @@
+🎮 Starting Game WebSocket Tests...
+
+1. Testing basic connection...
+✅ Connected successfully
+2. Testing ping/pong...
+📨 Received: {
+  type: 'welcome',
+  message: 'Connected to game server',
+  userId: '1234',
+  stats: { activeConnections: 1, gameSessions: 0, matchmakingQueue: 0 }
+}
+📨 Received: { type: 'pong', userId: '1234' }
+3. Joining matchmaking...
+📨 Received: {
+  type: 'matchmaking_result',
+  payload: { success: true, position: 1, queueSize: 1 }
+}
+4. Testing player movement...
+📨 Received: {
+  type: 'error',
+  message: 'Invalid message format or validation failed'
+}
+
+✅ All tests completed
