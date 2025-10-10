@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 
-const ws = new WebSocket("ws://localhost:3000/ws/game");
+const ws = new WebSocket("ws://localhost:3000/v1/game/ws/game");
 
 ws.on("open", () => {
   console.log("Connected!");
