@@ -1,4 +1,4 @@
-import { success } from "zod";
+import { string, success } from "zod";
 import { prisma } from "../utils/prisma.js";
 import { z } from 'zod';
 
@@ -19,7 +19,7 @@ export const matchmakingSchema = z.object({
 });
 
 export const gameReadySchema = z.object({
-  gameId: z.string().uuid()
+  gameId: z.string().min(1)
 });
 
 export type PlayerMoveInput = z.infer<typeof playerMoveSchema>;
@@ -33,21 +33,56 @@ export class GameServices {
     private gameSessions = new Map<string, any>();
     private matchmakingQueue: string[] = [];
 
+    private botConnections = new Map<string, any>(); // botId -> mock connection
+    private matchmakingJoinTimes = new Map<string, number>();
+
+
+
+
+
+
+    // ✅ ADD MATCHMAKING INTERVAL
+    private matchmakingInterval: NodeJS.Timeout | null = null;
+
+    constructor() {
+      // ✅ START PERIODIC MATCHMAKING CHECKS
+      this.startMatchmakingProcessor();
+    }
+
+    // ✅ ADD METHOD TO PERIODICALLY CHECK MATCHMAKING
+    private startMatchmakingProcessor() {
+      this.matchmakingInterval = setInterval(() => {
+        this.tryMatchPlayers('classic'); // Check for classic games
+        // You can add other game types here
+      }, 2000); // Check every 2 seconds
+    }
+
+
+
+
+
+
     async handlePlayerMove(userId: string, payload: PlayerMoveInput) {
-        console.log(`Player ${userId} moved:`, payload);
+        console.log(`🎮 ${userId.startsWith('bot-') ? '🤖 Bot' : 'Player'} ${userId} moved:`, payload);
 
         const gameSession = this.gameSessions.get(payload.gameId);
         if (gameSession) {
-            gameSession.players.forEach((playerId: string) => {
-                if (playerId !== userId) {
-                    this.notifyPlayer(playerId, {
-                        type: 'player moved',
-                        payload: { userId, ...payload }
-                    });
+          // Forward movement to other players in the same game
+          gameSession.players.forEach((playerId: string) => {
+            if (playerId !== userId) {
+              this.notifyPlayer(playerId, {
+                type: 'player_moved',
+                payload: {
+                  userId,
+                  ...payload,
+                  isBot: userId.startsWith('bot-')
                 }
-            });
+              });
+            }
+          });
         }
-        return { success: true, message: ' movement processed'};
+
+        return { success: true, message: 'Movement processed' };
     }
 
     async handleGameJoin(userId: string, payload: GameJoinInput) {
@@ -112,6 +147,9 @@ export class GameServices {
       private async joinMatchmaking(userId: string, gameType: string) {
         if (!this.matchmakingQueue.includes(userId)) {
           this.matchmakingQueue.push(userId);
+
+          // track join times
+          this.matchmakingJoinTimes.set(userId, Date.now());
         }
 
         console.log(`Matchmaking queue: ${this.matchmakingQueue.length} players`);
@@ -136,15 +174,44 @@ export class GameServices {
             const player2 = this.matchmakingQueue.shift()!;
             console.log(`Matched players: ${player1} vs ${player2}`);
             await this.createGameSession(player1, player2, gameType);
+            return ;
+        }
+
+        if (this.matchmakingQueue.length === 1) {
+          const playerId = this.matchmakingQueue[0];
+          if (!playerId)
+            return ;
+
+          const joinTime = this.matchmakingJoinTimes.get(playerId);
+          if (!joinTime) {
+            this.matchmakingJoinTimes.set(playerId, Date.now())
+            return ;
+          }
+
+          const waitTime = Date.now() - joinTime;
+
+          // 10 seconds for testing (change to 30000 for production)
+          if (waitTime > 10000) {
+            const player = this.matchmakingQueue.shift()!;
+            const botId = `bot-${Date.now()}`;
+            console.log(`🤖 Matching ${player} with bot ${botId}`);
+            await this.createGameSession(player, botId, gameType);
+
+            if (playerId)
+              this.matchmakingJoinTimes.delete(playerId);
+          }
         }
     }
     private async createGameSession(player1Id: string, player2Id: string, gameType: string) {
+        const isPlayer2Bot = player2Id.startsWith('bot-');
+
         const gameSession = {
             id: `game-${Date.now()}`,
             players: [player1Id, player2Id],
             gameType,
             status: 'starting' as const,
-            createdAt: new Date()
+            createdAt: new Date(),
+            isBotGame: isPlayer2Bot // Track if this is a bot game
         };
 
         this.gameSessions.set(gameSession.id, gameSession);
@@ -152,15 +219,56 @@ export class GameServices {
         // Notify both players
         this.notifyPlayer(player1Id, {
             type: 'game_matched',
-            payload: { ...gameSession, yourPlayerId: player1Id }
+            payload: { ...gameSession, yourPlayerId: player1Id, opponentIsBot: isPlayer2Bot  }
         });
-        this.notifyPlayer(player2Id, {
-            type: 'game_matched',
-            payload: { ...gameSession, yourPlayerId: player2Id }
-        });
+
+        if (isPlayer2Bot) {
+            this.startBotBehavior(player2Id, gameSession.id);
+        } else {
+          this.notifyPlayer(player2Id, {
+              type: 'game_matched',
+              payload: { ...gameSession, yourPlayerId: player2Id, opponentIsBot: false }
+          });
+        }
 
         return gameSession;
     }
+
+    private startBotBehavior(botId: string, gameId: string) {
+        console.log(`🤖 Starting bot ${botId} for game ${gameId}`);
+
+        // Simulate bot sending ready message after 1 second
+        setTimeout(() => {
+          this.handleGameReady(botId, { gameId });
+        }, 1000);
+
+        // Bot makes random movements every 2 seconds
+        const botInterval = setInterval(() => {
+          if (!this.gameSessions.has(gameId)) {
+            clearInterval(botInterval);
+            return;
+          }
+
+          const directions = ['up', 'down', 'left', 'right'] as const;
+
+          const randomDirection = directions[Math.floor(Math.random() * directions.length)] as typeof directions[number];
+
+          // Send bot movement
+          this.handlePlayerMove(botId, {
+            direction: randomDirection,
+            gameId: gameId,
+            timestamp: Date.now()
+          });
+
+      }, 2000); // Move every 2 seconds
+
+      // Store interval for cleanup
+      const gameSession = this.gameSessions.get(gameId);
+      if (gameSession) {
+        gameSession.botInterval = botInterval;
+      }
+  }
+
 
     private startGame(gameId: string) {
         const gameSession = this.gameSessions.get(gameId);
@@ -185,25 +293,36 @@ export class GameServices {
         // Remove from any active games
         this.gameSessions.forEach((session, gameId) => {
             if (session.players.includes(userId)) {
-                this.handlePlayerDisconnect(gameId, userId);
-            }
+              this.handlePlayerDisconnect(gameId, userId);
+          }
         });
     }
 
-    private handlePlayerDisconnect(gameId: string, userId: string) {
-        const gameSession = this.gameSessions.get(gameId);
-        if (gameSession) {
-            this.notifyPlayers(gameSession.players.filter((id: string) => id !== userId), {
-                type: 'player_disconnected',
-                payload: { gameId, userId }
-            });
+    destroy() {
+      if (this.matchmakingInterval) {
+        clearInterval(this.matchmakingInterval);
+    }
+  }
 
-            // Clean up empty games
-            gameSession.players = gameSession.players.filter((id: string) => id !== userId);
-            if (gameSession.players.length === 0) {
-                this.gameSessions.delete(gameId);
-            }
+     private handlePlayerDisconnect(gameId: string, userId: string) {
+      const gameSession = this.gameSessions.get(gameId);
+      if (gameSession) {
+        // Clean up bot interval if this was a bot game
+        if (gameSession.botInterval) {
+          clearInterval(gameSession.botInterval);
         }
+
+        this.notifyPlayers(gameSession.players.filter((id: string) => id !== userId), {
+          type: 'player_disconnected',
+          payload: { gameId, userId }
+        });
+
+        // Clean up empty games
+        gameSession.players = gameSession.players.filter((id: string) => id !== userId);
+        if (gameSession.players.length === 0) {
+          this.gameSessions.delete(gameId);
+        }
+      }
     }
 
     getStats() {

@@ -17,7 +17,7 @@ export const matchmakingSchema = z.object({
 });
 
 export const gameReadySchema = z.object({
-    gameId: z.string().uuid()
+    gameId: z.string().min(1)
 });
 
 export type PlayerMoveInput = z.infer<typeof playerMoveSchema>;
