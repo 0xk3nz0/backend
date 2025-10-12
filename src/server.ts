@@ -1,3 +1,7 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import Fastify, {
     type FastifyError,
     type FastifyInstance,
@@ -30,11 +34,24 @@ import type Ajv from 'ajv';
 import { chatSchema } from 'schemas/chat.js';
 
 import { prisma as PrismaClientInstance } from './utils/prisma.js';
+
 import LoggingOpts from './utils/logger.js';
+import accesslog from 'plugins/accesslog.js';
 
 
 
 export const fastify: FastifyInstance = Fastify({ logger: LoggingOpts });
+
+/// NOTE: just for test !!!
+// fastify.addHook('onResponse', (req: FastifyRequest, res: FastifyReply, done) => {
+//     process.stdout.write("hook triggered!\n");
+//     // ...rest of your code...
+//     done();
+// });
+
+// fastify.get('/test-accesslog', async (req, res) => {
+//     return { ok: true };
+// });
 
 export const wsValidators: Record<string, Ajv.ValidateFunction> = {};
 
@@ -83,6 +100,7 @@ export default class Server {
     swaggerOpts: FastifyPluginOptions;
     swaggerUIOpts: FastifyPluginOptions;
     ajv: Ajv2020;
+    logFP: string;
 
     constructor(
         host: string, port: number,
@@ -96,6 +114,7 @@ export default class Server {
         },
         plugins: (FastifyPluginCallback | FastifyPluginAsync)[] = [],
         multipartFSize: number = 10485760,
+        log_fp: string = '/var/log/fastify/access.log'
     ) {
         this.host = host;
         this.port = port;
@@ -132,6 +151,18 @@ export default class Server {
         this.ajv = new Ajv2020({ allErrors: true });
         addErrors(this.ajv);
         addFormats(this.ajv);
+        this.logFP = log_fp;
+        try {
+            const dir = path.dirname(this.logFP);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+        } catch (e) {
+            this.logFP = path.join(
+                path.dirname(fileURLToPath(import.meta.url)),
+                'access.log'
+            );
+        }
     }
 
     private async connectPrismaClient(): Promise<void> {
@@ -148,6 +179,11 @@ export default class Server {
     }
 
     private async registerPlugs(): Promise<void> {
+        await this.fastify.register(accesslog, {
+            filePath: this.logFP,
+            consoleOutput: true,
+            trustProxy: true
+        });
         await this.fastify.register(helmet);
         await this.fastify.register(fastifySwagger, this.swaggerOpts);
         await this.fastify.register(fastifySwaggerUi, this.swaggerUIOpts);

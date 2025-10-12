@@ -6,6 +6,7 @@ import Server from "./server.js";
 import PreHandler from './hooks/pre.js'
 import SendHandler from './hooks/send.js'
 import CloseHandler from './hooks/close.js';
+import RegisterHandler from './hooks/register.js';
 
 import UserRoutes from './routes/user.js';
 import FriendRoutes from './routes/friend.js';
@@ -52,6 +53,7 @@ const hooks = {
     'onClose': CloseHandler,
     'onSend': SendHandler,
     'preHandler': PreHandler,
+    // 'onRegister': RegisterHandler
 };
 
 const secrets = {
