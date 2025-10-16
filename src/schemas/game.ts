@@ -24,3 +24,5 @@ export type PlayerMoveInput = z.infer<typeof playerMoveSchema>;
 export type GameJoinInput = z.infer<typeof gameJoinSchema>;
 export type MatchmakingInput = z.infer<typeof matchmakingSchema>;
 export type GameReadyInput = z.infer<typeof gameReadySchema>;
+
+
