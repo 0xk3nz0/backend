@@ -9,4 +9,5 @@ export default (fastify: FastifyInstance, options: FastifyPluginOptions) => {
     await handleGameWebSocket(connection, request);
   });
 
+
 };

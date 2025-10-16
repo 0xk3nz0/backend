@@ -2,12 +2,12 @@ import { z } from 'zod'
 
 export const playerMoveSchema = z.object({
     direction: z.enum(['up', 'down', 'left', 'right']),
-    gameId: z.string().uuid(),
+    gameId: z.string().min(1),
     timestamp: z.number()
 });
 
 export const gameJoinSchema = z.object({
-    gameId: z.string().uuid().optional(),
+    gameId: z.string().min(1).optional(),
     gameType: z.enum(['classic', 'tournament']).default('classic')
 });
 
