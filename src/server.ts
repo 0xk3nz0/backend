@@ -206,16 +206,16 @@ export default class Server {
 
     /**
      * Configures a custom JSON schema validator using AJV 2020-12 with enhanced features.
-     * 
+     *
      * This validator supports:
      * - All validation errors collection (not just first error)
      * - Custom error messages via ajv-errors plugin
      * - Format validation (UUID, email, date, etc.) via ajv-formats plugin
-     * 
+     *
      * @param {Object} options - Validator compiler options
      * @param {Object} options.schema - JSON schema to compile
      * @returns {Function} Compiled validation function
-     * 
+     *
      * @example
      * // Schema with custom error and UUID format
      * const schema = {

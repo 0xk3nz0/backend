@@ -1,0 +1,8 @@
+🎮 Testing Two-Player Matchmaking...
+
+✅ Player 1 connected
+✅ Player 2 connected
+🔍 Player 1 joined matchmaking
+🔍 Player 2 joined matchmaking
+
+✅ Two-player test completed

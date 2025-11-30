@@ -8,6 +8,7 @@ import { prisma } from '../utils/prisma.js';
 import { wsValidators } from '../server.js';
 import { WebSocket as WS } from 'ws';
 import process from 'process';
+import type { User } from 'generated/prisma/index.js';
 
 export const CONFIG = {
     MESSAGE: {
@@ -328,6 +329,1518 @@ const escapeHtml = (input: string): string => {
         .replace(/'/g, '&#39;');
 }
 
+const maxRequests = 10; // 10 req
+const windowMs = 60000; // 60 sec
+
+// Chat endpoints
+const createRoom = async (connection: ExtendedWS, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { name, type = 'GROUP', userId, description } = payload as chatModel.CreateRoomPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: User ID mismatch'
+        }));
+        return;
+    }
+
+    // Validate room name
+    if (!name || name.trim().length === 0) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Room name is required'
+        }));
+        return ;
+    }
+    
+    if (name.length > CONFIG.ROOM.MAX_NAME_LENGTH) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: `Room name must be less than ${CONFIG.ROOM.MAX_NAME_LENGTH} characters`
+        }));
+        return ;
+    }
+
+    const validTypes = ['DIRECT', 'GROUP']; // 'CHANNEL'
+    if (!validTypes.includes(type)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Invalid room type, Valid types: DIRECT, GROUP'
+        }));
+        return ;
+    }
+
+    
+    try {
+        const sanitizedName = escapeHtml(name.trim());
+        
+        const existingRoom = await prisma.room.findFirst({
+            where: {
+                name: sanitizedName,
+                type: type
+            }
+        });
+
+        if (existingRoom) {
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Room with this name already exists'
+            }));
+            return ;
+        }
+
+        // const sanitizedDescription = description ? escapeHtml(description.trim()) : null;
+
+        // Use a transaction to ensure atomicity: with transaction Both operations succeed together OR both fail together
+        const txResult = await prisma.$transaction(async (tx) => {
+            // Create the room
+            const newRoom = await tx.room.create({
+                data: {
+                    name: sanitizedName,
+                    type,
+                    // description: sanitizedDescription,
+                }
+            });
+
+            // Add creator as OWNER in the same transaction
+            await tx.roomMember.create({
+                data: {
+                    userId: authUser.uid,
+                    roomId: newRoom.id,
+                    role: 'OWNER'
+                }
+            });
+            return newRoom;
+        });
+
+        // Initialize live connections for this room
+        liveConnections[txResult.id] = new Set();
+        liveConnections[txResult.id]?.add(connection);
+
+        if (!connection.userData) {
+            connection.userData = { userId: authUser.uid, rooms: new Set() };
+        }
+        connection.userData.rooms.add(txResult.id);
+
+        // Send success response
+        connection.send(JSON.stringify({
+            type: 'room_created',
+            payload: {
+                room: {
+                    id: txResult.id,
+                    name: txResult.name,
+                    type: txResult.type,
+                    // description: txResult.description,
+                    createdAt: txResult.createdAt,
+                    createdBy: authUser.uid
+                },
+                userRole: 'OWNER'
+            }
+        }));
+
+    } catch(error) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to create room'
+        }));
+    }
+}
+
+const joinRoom = async (connection: ExtendedWS, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId } = payload as chatModel.JoinRoomPayload;
+
+    if (authUser.uid !== userId) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: User ID mismatch'
+        }));
+        return ;
+    }
+
+    try {
+        // Validate room and user
+        const roomMember = await prisma.roomMember.findUnique({
+            where: { userId_roomId: { userId, roomId } }
+        });
+
+        const room = await prisma.room.findUnique({
+            where: { id: roomId },
+            include: {
+                members: {
+                    select: { userId: true, role: true }
+                }
+            }
+        });
+        if (!room) {
+            connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+            return;
+        }
+
+        const user = await prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            connection.send(JSON.stringify({ type: 'error', message: 'User not found' }));
+            return;
+        }
+
+        const membership = room.members.find(m => m.userId === userId);
+        if(!membership) {
+            await prisma.roomMember.create({
+                data: { userId, roomId, role: 'MEMBER' }
+            });
+        }
+
+        // Track connection
+        liveConnections[roomId] = liveConnections[roomId] ?? new Set();
+        liveConnections[roomId].add(connection);
+
+        if (!connection.userData) {
+            connection.userData = { userId, rooms: new Set() };
+        }
+        connection.userData.rooms.add(roomId);
+
+        connection.send(JSON.stringify({
+            type: 'joined',
+            payload: {
+                roomId: room.id,
+                roomName: room.name,
+                type: room.type,
+                members: room.members.map(m => ({ userId: m.userId, role: m.role })),
+                joinedAt: new Date().toISOString()
+            }
+        }));
+    } catch(error) {
+        request.log.error(
+            {
+                error,
+                roomId,
+                userId
+            },
+            'Failed to join room'
+        );
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to join room'
+        }));
+    }
+}
+
+const leaveRoom = async (connection: ExtendedWS, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId } = payload as chatModel.LeaveRoomPayload;
+
+    if (authUser.uid !== userId) {
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    const roomMember = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId,
+                roomId
+            }
+        }
+    });
+
+    if (!roomMember) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'You are not a member of this room'
+        }));
+        return ;
+    }
+
+    // Validate room and user
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+        return;
+    }
+
+    // Remove connection
+    liveConnections[roomId]?.delete(connection);
+    if (connection.userData?.rooms) {
+        connection.userData.rooms.delete(roomId);
+        if (connection.userData.rooms.size === 0) {
+            delete connection.userData;
+        }
+    }
+
+    await prisma.roomMember.delete({
+        where: { userId_roomId: { userId, roomId } }
+    });
+
+    // Notify room members
+    liveConnections[roomId]?.forEach((ws) => {
+        if (ws.readyState === WS.OPEN && ws.userData?.userId !== userId) {
+            ws.send(JSON.stringify({
+                type: 'member_left',
+                payload: { roomId, userId }
+            }));
+        }
+    });
+
+    connection.send(JSON.stringify({ type: 'left', payload: { roomId, userId } }));
+}
+
+const deleteRoom = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId } = payload as chatModel.DeleteRoomPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    // Step 1: Check if room exists
+    const room = await prisma.room.findUnique({
+        where: { id: roomId }
+    });
+    if (!room) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Room not found'
+        }));
+        return;
+    }
+
+    // Step 2: Check membership and ownership
+    const userMembership = await prisma.roomMember.findUnique({
+        where: { userId_roomId: { userId: authUser.uid, roomId } }
+    });
+
+    if (!userMembership || userMembership.role !== 'OWNER') {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Only room owner can delete the room'
+        }));
+        return ;
+    }
+
+    // Step 3: Delete room
+    await prisma.room.delete({
+        where: { id: roomId }
+    });
+
+    // Step 4: Notify and clean up connections
+    liveConnections[roomId]?.forEach((ws) => {
+        if (ws.readyState === WS.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'room_removed',
+                payload: { roomId }
+            }));
+        }
+        ws.userData?.rooms?.delete(roomId);
+        if (ws.userData?.rooms?.size === 0) {
+            delete ws.userData;
+        }
+    });
+    // Step 5: Confirm success to owner
+    delete liveConnections[roomId];
+    connection.send(JSON.stringify({
+        type: 'room_deleted_success',
+        payload: { roomId }
+    }));
+}
+
+const getRoomMembers = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId } = payload as chatModel.GetRoomMembersPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    try {
+        const [roomMember, members] = await Promise.all([
+            prisma.roomMember.findUnique({
+                where: {
+                    userId_roomId: {
+                        userId: authUser.uid,
+                        roomId
+                    }
+                }
+            }),
+            prisma.roomMember.findMany({
+                where: { roomId },
+                select: {
+                    userId: true,
+                    role: true,
+                    joinedAt: true,
+                    user: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            status: true
+                        }
+                    }
+                },
+                orderBy: [
+                    { role: 'asc' },
+                    { joinedAt: 'asc' }
+                ]
+            })
+        ]);
+
+        if (!roomMember) {
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Not a member of this room'
+            }));
+            return ;
+        }
+
+        connection.send(JSON.stringify({
+            type: 'room_members',
+            payload: {
+                roomId,
+                members: members.map(m => ({
+                    userId: m.userId,
+                    role: m.role,
+                    joinedAt: m.joinedAt,
+                    user: m.user
+                }))
+            }
+        }));
+
+    } catch(error) {
+        request.log.error(
+            {
+                error,
+                roomId
+            },
+            'Failed to fetch room members'
+        );
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to fetch room members'
+        }));
+    }
+}
+
+const kickMember = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId, targetUserId } = payload as chatModel.KickMemberPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    // Room-specific rate limiting for kick actions
+    if (!checkRoomRateLimit(connection, roomId, 'kick', CONFIG.RATE_LIMITS.ROOM_KICKS_PER_MINUTE, windowMs)) { // 2 kicks per room per minute
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Room-specific rate limit exceeded for kick action'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ROOM_KICKS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+
+    // Check general rate limit
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) { // 3 total admin actions per minute
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+
+    // Check if user is admin/owner of this room
+    const userMembership = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId: authUser.uid,
+                roomId
+            }
+        }
+    });
+
+    if (!userMembership) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Not a member of this room'
+        }));
+        return ;
+    }
+
+    if (userMembership.role !== 'ADMIN' && userMembership.role !== 'OWNER') {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Insufficient permissions: Only admins can kick members'
+        }));
+        return ;
+    }
+
+    // Can't kick yourself
+    if (authUser.uid === targetUserId) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Cannot kick yourself'
+        }));
+        return ;
+    }
+
+    // Check if the target user in the room
+    const targetMembership = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId: targetUserId,
+                roomId
+            }
+        }
+    });
+
+    if (!targetMembership) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Target is not a member of this room'
+        }));
+        return ;
+    }
+
+    // Can't kick owne
+    if (targetMembership.role === 'OWNER') {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Cannot kick room owner'
+        }));
+        return ;
+    }
+
+    await prisma.roomMember.delete({
+        where: {
+            userId_roomId: {
+                userId: targetUserId,
+                roomId
+            }
+        }
+    });
+
+    // Notify and disconnect the kicked user's connections
+    const targetConnections = userConnections.get(targetUserId) || new Set();
+    targetConnections?.forEach((ws) => {
+        if (ws.userData?.rooms.has(roomId)) {
+            ws.send(JSON.stringify({
+                type: 'kicked_from_room',
+                payload: {
+                    roomId,
+                    kickedBy: authUser.uid,
+                    reason: 'You have been removed from this room'
+                }
+            }));
+            liveConnections[roomId]?.delete(ws);
+            ws.userData.rooms.delete(roomId);
+            if (ws.userData.rooms.size === 0) {
+                delete ws.userData;
+            }
+        }
+    });
+
+    // Notify all room members
+    liveConnections[roomId]?.forEach((ws) => {
+        if (ws.readyState === WS.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'member_kicked',
+                payload: {
+                    roomId,
+                    kickedUserId: targetUserId,
+                    kickedBy: authUser.uid
+                }
+            }));
+        }
+    });
+
+    // Confirm to admin
+    connection.send(JSON.stringify({
+        type: 'member_kicked_success',
+        payload: {
+            roomId,
+            kickedUserId: targetUserId
+        }
+    }));
+}
+
+const promoteMember = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.PROMOTE_MEMBER, windowMs)) { // 3 promotions per minute
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${maxRequests} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    // Validate new role
+    const validRoles = ['MEMBER', 'ADMIN', 'OWNER'];
+    if(!validRoles.includes(newRole)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Invalid role. valid roles MEMBER, ADMIN, OWNER'
+        }));
+        return ;
+    }
+
+    const userMembership = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId: authUser.uid,
+                roomId
+            }
+        }
+    });
+
+    if (!userMembership) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Not a member of this room'
+        }));
+        return ;
+    }
+    
+    if (userMembership.role !== 'ADMIN' && userMembership.role !== 'OWNER') {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Insufficient permissions: Only admins can promote members'
+        }));
+        return ;
+    }
+
+    // Check if target user is in the room
+    const targetMembership = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId: targetUserId,
+                roomId
+            }
+        }
+    });
+
+    if (!targetMembership) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'User is not a member of this room'
+        }));
+        return ;
+    }
+    
+    // Only OWNER can promote to OWNER or demote from OWNER
+    if ((newRole === 'OWNER' || targetMembership.role === 'OWNER') && userMembership.role !== 'OWNER') {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Only room owner can change owner status'
+        }));
+        return ;
+    }
+
+    // Can't change ur own role
+    if (authUser.uid === targetUserId) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Cannot change your own role'
+        }));
+        return ;
+    }
+
+    try {
+
+        // Special case: If promoting to OWNER, demote cureent owner to ADMIN
+        if (newRole === 'OWNER') {
+            await prisma.roomMember.update({
+                where: {
+                    userId_roomId: {
+                        userId: authUser.uid,
+                        roomId
+                    }
+                },
+                data: {
+                    role: 'ADMIN'
+                }
+            });
+        }
+
+        // Update the target user's role
+        const updatedMember = await prisma.roomMember.update({
+            where: {
+                userId_roomId: {
+                    userId: targetUserId,
+                    roomId
+                }
+            },
+            data: {
+                role: newRole
+            }
+        });
+
+        // Notify all room members
+        liveConnections[roomId]?.forEach((ws) => {
+            if (ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'member_role_changed',
+                    payload: {
+                        roomId,
+                        userId: targetUserId,
+                        newRole,
+                        changedBy: authUser.uid
+                    }
+                }));
+            }
+        });
+
+        // Notify the promoted user across all their connections
+        const targetConnections = userConnections.get(targetUserId) || new Set();
+        targetConnections?.forEach((ws) => {
+            if (ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'member_role_changed',
+                    payload: {
+                        roomId,
+                        userId: targetUserId,
+                        newRole,
+                        changedBy: authUser.uid
+                    }
+                }));
+            }
+        });
+
+        // Confirm to admin
+        connection.send(JSON.stringify({
+            type: 'member_role_changed',
+            payload: {
+                roomId,
+                userId: targetUserId,
+                newRole,
+                oldRole: targetMembership.role
+            }
+        }));
+    } catch(error) {
+        request.log.error(
+            {
+                error,
+                roomId,
+                targetUserId,
+                newRole
+            },
+            'Failed to promote member'
+        );
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to update member role'
+        }));
+    }
+}
+
+const sendMessage = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, maxRequests, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${maxRequests} requests in ${windowMs / 1000}s`);
+        return ;
+    }
+
+    const { roomId, senderId, text } = payload as chatModel.SendMessagePayload;
+
+    if (authUser.uid !== senderId) {
+        request.log.warn({ type, senderId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    // Validate message content
+    if (!text || text.trim().length === 0) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Message content cannot be empty'
+        }));
+        return ;
+    }
+
+    if (text.length > CONFIG.MESSAGE.MAX_LENGTH) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: `Message too long (max ${CONFIG.MESSAGE.MAX_LENGTH} characters)`
+        }));
+        return ;
+    }
+
+    try {
+        const roomMember = await prisma.roomMember.findUnique({
+            where: {
+                userId_roomId: {
+                    userId: authUser.uid,
+                    roomId
+                }
+            },
+            include: {
+                room: {
+                    select: {
+                        id: true,
+                        name: true
+                    }
+                }
+            }
+        });
+
+        if (!roomMember || !roomMember.room) {
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Not a member of this room or room not found'
+            }));
+            return ;
+        }
+
+        const sanitizedText = escapeHtml(text.trim());
+
+        // Persist message
+        const message = await prisma.message.create({
+            data: {
+                content: sanitizedText,
+                senderId,
+                roomId
+            }
+        });
+
+        // Broadcast to room
+        liveConnections[roomId]?.forEach((ws) => {
+            if (ws.readyState === WS.OPEN) {
+                ws.send(
+                    JSON.stringify({
+                        type: 'message',
+                        payload: {
+                            id: message.id,
+                            roomId,
+                            senderId,
+                            text: sanitizedText,
+                            createdAt: message.createdAt,
+                        },
+                    })
+                );
+            }
+        });
+    } catch(error) {
+        request.log.error(
+            {
+                error,
+                senderId,
+                roomId
+            },
+            'Failed to send message'
+        );
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to send message'
+        }));
+    }
+}
+
+const getMessages = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    const roomMember = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId: authUser.uid,
+                roomId
+            }
+        },
+        include: { room: true }
+    });
+
+    if (!roomMember) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Not a member of this room'
+        }));
+
+        return ;
+    }
+
+    // Validate room
+    const room = roomMember.room;
+    if (!room) {
+        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+        return;
+    }
+
+    const messages = await prisma.message.findMany({
+        where: { roomId },
+        include: { sender: true, receiver: true },
+        orderBy: { createdAt: 'asc' },
+        skip: offset,
+        take: limit,
+    });
+
+    connection.send(JSON.stringify({ type: 'messages', payload: messages }));
+}
+
+const getMoreMessages = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { roomId, userId, limit = 10, reset = false } = payload as chatModel.GetMoreMessagesPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    const roomMember = await prisma.roomMember.findUnique({
+        where: {
+            userId_roomId: {
+                userId: authUser.uid,
+                roomId
+            }
+        }
+    });
+
+    if (!roomMember) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Not a member of this room'
+        }));
+
+        return ;
+    }
+
+    // Initialize client tracking
+    if (!clientOffsets.has(connection)) {
+        clientOffsets.set(connection, { offsets: new Map(), lastAccess: Date.now() });
+    }
+    const clientData = clientOffsets.get(connection)!;
+    clientData.lastAccess = Date.now();
+
+    // const roomOffsets = clientOffsets.get(connection)!;
+
+    // Handle reset - set offset to 0 if requested
+    let offset = clientData.offsets.get(roomId) ?? 0;
+    if (reset) {
+        offset = 0;
+        clientData.offsets.set(roomId, 0);
+    }
+    
+    // Validate room
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+        return;
+    }
+
+    try {
+        // Fetch the next batch of messages
+        const messages = await prisma.message.findMany({
+            where: { roomId },
+            include: { sender: true, receiver: true },
+            orderBy: { createdAt: 'asc' },
+            skip: offset,
+            take: limit
+        });
+
+        // Update offset for next request
+
+        // roomOffsets.set(roomId, offset + messages.length);
+        clientData.offsets.set(roomId, offset + messages.length);
+
+        // Send messages to client
+        connection.send(JSON.stringify({ type: 'more_messages', payload: messages }));
+    } catch(error) {
+        request.log.error(
+            {
+                error,
+                roomId
+            }
+        );
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to fetch messages'
+        }));
+    }
+}
+
+const sendDirectMessage = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.MESSAGES_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.MESSAGES_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return ;
+    }
+
+    const { senderId, receiverId, text } = payload as chatModel.DirectMessagePayload;
+
+    if (authUser.uid !== senderId) {
+        request.log.warn({ type, senderId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    // Validate sender and receiver
+    const [sender, receiver] = await Promise.all([
+        prisma.user.findUnique({ where: { id: senderId } }),
+        prisma.user.findUnique({ where: { id: receiverId } }),
+    ]);
+    if (!sender || !receiver) {
+        connection.send(JSON.stringify({ type: 'error', message: 'Sender or receiver not found' }));
+        return;
+    }
+    if (senderId === receiverId) {
+        connection.send(JSON.stringify({ type: 'error', message: 'Cannot send message to yourself' }));
+        return;
+    }
+
+    try {
+        const sanitizedText = escapeHtml(text);
+
+        // Persist message
+        const message = await prisma.message.create({
+            data: { content: sanitizedText, senderId, receiverId },
+        });
+
+        // Send to receiver's connections
+        const receiverConnections = userConnections.get(receiverId) || new Set();
+        receiverConnections.forEach((ws) => {
+            if (ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'direct_message',
+                    payload: {
+                        id: message.id,
+                        senderId,
+                        receiverId,
+                        text: sanitizedText,
+                        createdAt: message.createdAt,
+                    }
+                }));
+            }
+        });
+
+        // Confirm to sender
+        connection.send(JSON.stringify({ type: 'direct_message_sent', payload: message }));
+    } catch(error) {
+        request.log.error(
+            {
+                error,
+                senderId,
+                receiverId
+            },
+            'Failed to send direct message'
+        );
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to send direct message'
+        }));
+    }
+}
+
+const editMessage = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.EDITS_PER_10_SECONDS, 10000)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        return ;
+    }
+
+    const { messageId, newText, userId } = payload as chatModel.EditMessagePayload;
+
+    // Verify user is authenticated and matches
+    if (authUser.uid !== userId) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: User ID mismatch'
+        }));
+        return ;
+    }
+
+    // Validate message exists and get room info
+    const message = await prisma.message.findUnique({
+        where: {
+            id: messageId
+        },
+        include: {
+            room: { include: { members: true } },
+            sender: true
+        }
+    });
+
+    if (!message) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Message not found'
+        }));
+        return ;
+    }
+
+    // Check if user is the message sender
+    if (message.sender.id !== authUser.uid) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: Can only edit your own messages'
+        }));
+        return ;
+    }
+
+    // For room messages, verify user is still a room member
+    if (message.roomId) {
+        const roomMember = await prisma.roomMember.findUnique({
+            where: {
+                userId_roomId: {
+                    userId: authUser.uid,
+                    roomId: message.roomId
+                }
+            }
+        });
+
+        if (!roomMember) {
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Not a member of this room'
+            }));
+            return ;
+        }
+    }
+
+    // Check if message is too old to edit (e.g., 24 hours)
+    const messageAge = Date.now() - message.createdAt.getTime();
+    const maxEditAge = CONFIG.MESSAGE.EDIT_WINDOW_HOURS * 60 * 60 * 1000;
+    if (messageAge > maxEditAge) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Message is too old to edit (max 24 hours)'
+        }));
+        return ;
+    }
+
+    // Validate new text
+    if (!newText || newText.trim().length === 0) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Message content cannot be empty'
+        }));
+        return ;
+    }
+
+    if (newText.length > CONFIG.MESSAGE.MAX_LENGTH) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: `Message max length is ${CONFIG.MESSAGE.MAX_LENGTH} characters`
+        }));
+        return ;
+    }
+
+    try {
+        const sanitizedText = escapeHtml(newText.trim());
+
+        // Update the message
+        const updatedMessage = await prisma.message.update({
+            where: {
+                id: messageId
+            },
+            data: {
+                content: sanitizedText,
+                updatedAt: new Date()
+            },
+            include: {
+                sender: true,
+                receiver: true
+            }
+        });
+
+        // Broadcast the edit to relevant connections
+        if (message.roomId) {
+            // Room message - broadcast to all room members
+            liveConnections[message.roomId]?.forEach((ws) => {
+                if (ws.readyState == WS.OPEN && ws !== connection) {
+                    ws.send(JSON.stringify({
+                        type: 'message_edited',
+                        payload: {
+                            messageId: updatedMessage.id,
+                            roomId: message.roomId,
+                            senderId: updatedMessage.senderId,
+                            newText: updatedMessage.content,
+                            editedAt: updatedMessage.updatedAt,
+                            senderName: updatedMessage.sender.name
+                        }
+                    }));
+                }
+            });
+        } else if(message.receiverId) {
+            // Direct message - notify both sender and receiver
+            const targetUsers = [message.senderId, message.receiverId];
+            const targetConnections = targetUsers.flatMap((id): ExtendedWS[] => Array.from(userConnections.get(id) || new Set()));
+            targetConnections.forEach((ws) => {
+                if (ws.readyState === WS.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'direct_message_edited',
+                        payload: {
+                            messageId: updatedMessage.id,
+                            senderId: updatedMessage.senderId,
+                            receiverId: updatedMessage.receiverId,
+                            newText: updatedMessage.content,
+                            editedAt: updatedMessage.updatedAt,
+                        }
+                    }));
+                }
+            });
+        }
+
+        // Confirm to the editor
+        connection.send(JSON.stringify({
+            type: 'message_edit_success',
+            payload: {
+                messageId: updatedMessage.id,
+                newText: updatedMessage.content,
+                editedAt: updatedMessage.updatedAt
+            }
+        }));
+    } catch (error) {
+        request.log.error({ error, messageId, userId: authUser.uid }, 'Failed to edit message');
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Failed to edit message'
+        }));
+    }
+}
+
+const deleteMessage = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.DELETED_MESSAGES_PER_MINUTE, 60000)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        return ;
+    }
+
+    const { messageId, userId } = payload as { messageId: string, userId: string };
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: Cannot delete message as another user'
+        }));
+        return ;
+    }
+
+    const message = await prisma.message.findUnique({
+        where: { id: messageId },
+        include: { room: { include: { members: true } }, sender: true }
+    });
+    if (!message) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Message not found'
+        }));
+        return ;
+    }
+
+    if(message.sender.id !== authUser.uid) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: Can only delete your own messages'
+        }));
+        return ;
+    }
+
+    if (message.roomId) {
+        const roomMember = await prisma.roomMember.findUnique({
+            where: {
+                userId_roomId: {
+                    userId: authUser.uid,
+                    roomId: message.roomId
+                }
+            }
+        });
+        if (!roomMember) {
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Not a member of this room'
+            }));
+            return ;
+        }
+    }
+
+    await prisma.message.delete({
+        where: { id: messageId }
+    });
+    if (message.roomId) {
+        liveConnections[message.roomId]?.forEach((ws) => {
+            if(ws.readyState === WS.OPEN && ws !== connection) {
+                ws.send(JSON.stringify({
+                    type: 'message_deleted',
+                    payload: {
+                        messageId,
+                        roomId: message.roomId,
+                        deletedBy: authUser.uid
+                    }
+                }));
+            }
+        });
+    } else if (message.receiverId) {
+        const targetUsers = [message.senderId, message.receiverId];
+        const targetConnections = targetUsers.flatMap((id): ExtendedWS[] => Array.from(userConnections.get(id) || new Set()));
+        targetConnections.forEach((ws) => {
+            if(ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'direct_message_deleted',
+                    payload: { messageId, deletedBy: authUser.uid }
+                }));
+            }
+        });
+    }
+    connection.send(JSON.stringify({
+        type: 'message_delete_success',
+        payload: { messageId, deletedBy: authUser.uid }
+    }));
+}
+
+const updateStatus = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
+        return;
+    }
+    const { userId, status } = payload as chatModel.UpdateUserStatusPayload;
+
+    if (userId !== authUser.uid) {
+        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Unauthorized: User ID mismatch'
+        }));
+        return ;
+    }
+
+    const validStatuses = ['IN_GAME', 'OFFLINE', 'ONLINE', 'BUSY']; // 'AWAY
+    if (!validStatuses.includes(status)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Invalid status. Valid statuses: IN_GAME, OFFLINE, ONLINE, BUSY'
+        }));
+        return ;
+    }
+
+    // Persist status to database
+    await prisma.user.update({
+        where: { id: userId },
+        data: { status }
+    });
+
+    // Update status in database or notify relevant users
+    const userRooms = await prisma.roomMember.findMany({
+        where: { userId }
+    });
+
+    // Notify users
+    userRooms.forEach((room) => {
+        liveConnections[room.roomId]?.forEach((ws) => {
+            if (ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'user_status',
+                    payload: { userId, status }
+                }));
+            }
+        });
+    });
+
+    // Confirm to sender
+    connection.send(JSON.stringify({
+        type: 'status_updated',
+        payload: { userId, status }
+    }));
+}
+
+const typing = async (connection: ExtendedWS, type: string, authUser: User & { uid: string }, payload: any, request: FastifyRequest) => {
+    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.TYPING_PER_10_SECONDS, 10000)) {
+        connection.send(JSON.stringify({
+            type: 'error',
+            message: 'Rate limit exceeded, please try again later'
+        }));
+        return ;
+    }
+
+    const { userId, status, roomId, receiverId } = payload as chatModel.TypingPayload;
+
+    if (authUser.uid !== userId) {
+        connection.send(JSON.stringify({ 
+            type: 'error', 
+            message: 'Unauthorized: User ID mismatch' 
+        }));
+        return;
+    }
+
+    // Validate user
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+        connection.send(JSON.stringify({ type: 'error', message: 'User not found' }));
+        return;
+    }
+
+    if (roomId) {
+        // Validate room
+        const room = await prisma.room.findUnique({ where: { id: roomId } });
+        if (!room) {
+            connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
+            return;
+        }
+
+        const roomMember = await prisma.roomMember.findUnique({
+            where: {
+                userId_roomId: {
+                    userId: authUser.uid,
+                    roomId
+                }
+            }
+        });
+
+        if (!roomMember) {
+            connection.send(JSON.stringify({
+                type: 'error',
+                message: 'Not a member of this room'
+            }));
+
+            return ;
+        }
+
+        // Broadcast typing status to room
+        liveConnections[roomId]?.forEach((ws) => {
+            if (ws !== connection && ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({ type: 'typing', payload: { userId, roomId, status } }));
+            }
+        });
+    } else if (receiverId) {
+        // Validate receiver
+        const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
+        if (!receiver) {
+            connection.send(JSON.stringify({ type: 'error', message: 'Receiver not found' }));
+            return;
+        }
+
+        const receiverConnections = userConnections.get(receiverId) || new Set();
+        receiverConnections.forEach((ws) => {
+            if (ws.readyState === WS.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'typing',
+                    payload: {
+                        userId,
+                        receiverId,
+                        status
+                    }
+                }));
+            }
+        });
+    }
+}
+
 /**
  * Handles incoming WebSocket connections and routes messages based on their type.
  * 
@@ -371,9 +1884,6 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
         connection.close(1008, `Authentication failed: ${authResult.error}`);
         return ;
     }
-
-    const maxRequests = 10; // 10 req
-    const windowMs = 60000; // 60 sec
 
     // Store the authenticated user
     connection.authenticatedUser = authResult.user;
@@ -448,1527 +1958,77 @@ export const websocketHandler = async (connection: ExtendedWS, request: FastifyR
 
             switch (type) {
                 case 'create_room': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { name, type = 'GROUP', userId, description } = payload as chatModel.CreateRoomPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: User ID mismatch'
-                        }));
-                        return;
-                    }
-
-                    // Validate room name
-                    if (!name || name.trim().length === 0) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Room name is required'
-                        }));
-                        return ;
-                    }
-                    
-                    if (name.length > CONFIG.ROOM.MAX_NAME_LENGTH) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: `Room name must be less than ${CONFIG.ROOM.MAX_NAME_LENGTH} characters`
-                        }));
-                        return ;
-                    }
-
-                    const validTypes = ['DIRECT', 'GROUP']; // 'CHANNEL'
-                    if (!validTypes.includes(type)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Invalid room type, Valid types: DIRECT, GROUP'
-                        }));
-                        return ;
-                    }
-
-                    
-                    try {
-                        const sanitizedName = escapeHtml(name.trim());
-                        
-                        const existingRoom = await prisma.room.findFirst({
-                            where: {
-                                name: sanitizedName,
-                                type: type
-                            }
-                        });
-
-                        if (existingRoom) {
-                            connection.send(JSON.stringify({
-                                type: 'error',
-                                message: 'Room with this name already exists'
-                            }));
-                            return ;
-                        }
-
-                        // const sanitizedDescription = description ? escapeHtml(description.trim()) : null;
-
-                        // Use a transaction to ensure atomicity: with transaction Both operations succeed together OR both fail together
-                        const txResult = await prisma.$transaction(async (tx) => {
-                            // Create the room
-                            const newRoom = await tx.room.create({
-                                data: {
-                                    name: sanitizedName,
-                                    type,
-                                    // description: sanitizedDescription,
-                                }
-                            });
-
-                            // Add creator as OWNER in the same transaction
-                            await tx.roomMember.create({
-                                data: {
-                                    userId: authUser.uid,
-                                    roomId: newRoom.id,
-                                    role: 'OWNER'
-                                }
-                            });
-                            return newRoom;
-                        });
-
-                        // Initialize live connections for this room
-                        liveConnections[txResult.id] = new Set();
-                        liveConnections[txResult.id]?.add(connection);
-
-                        if (!connection.userData) {
-                            connection.userData = { userId: authUser.uid, rooms: new Set() };
-                        }
-                        connection.userData.rooms.add(txResult.id);
-
-                        // Send success response
-                        connection.send(JSON.stringify({
-                            type: 'room_created',
-                            payload: {
-                                room: {
-                                    id: txResult.id,
-                                    name: txResult.name,
-                                    type: txResult.type,
-                                    // description: txResult.description,
-                                    createdAt: txResult.createdAt,
-                                    createdBy: authUser.uid
-                                },
-                                userRole: 'OWNER'
-                            }
-                        }));
-
-                    } catch(error) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to create room'
-                        }));
-                    }
-
+                    createRoom(connection, authUser, payload, request);
                     break;
                 }
 
                 case 'join_room': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId } = payload as chatModel.JoinRoomPayload;
-
-                    if (authUser.uid !== userId) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: User ID mismatch'
-                        }));
-                        return ;
-                    }
-
-                    try {
-                        // Validate room and user
-                        const roomMember = await prisma.roomMember.findUnique({
-                            where: { userId_roomId: { userId, roomId } }
-                        });
-
-                        const room = await prisma.room.findUnique({
-                            where: { id: roomId },
-                            include: {
-                                members: {
-                                    select: { userId: true, role: true }
-                                }
-                            }
-                        });
-                        if (!room) {
-                            connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-                            return;
-                        }
-
-                        const user = await prisma.user.findUnique({ where: { id: userId } });
-                        if (!user) {
-                            connection.send(JSON.stringify({ type: 'error', message: 'User not found' }));
-                            return;
-                        }
-
-                        const membership = room.members.find(m => m.userId === userId);
-                        if(!membership) {
-                            await prisma.roomMember.create({
-                                data: { userId, roomId, role: 'MEMBER' }
-                            });
-                        }
-
-                        // Track connection
-                        liveConnections[roomId] = liveConnections[roomId] ?? new Set();
-                        liveConnections[roomId].add(connection);
-    
-                        if (!connection.userData) {
-                            connection.userData = { userId, rooms: new Set() };
-                        }
-                        connection.userData.rooms.add(roomId);
-    
-                        connection.send(JSON.stringify({
-                            type: 'joined',
-                            payload: {
-                                roomId: room.id,
-                                roomName: room.name,
-                                type: room.type,
-                                members: room.members.map(m => ({ userId: m.userId, role: m.role })),
-                                joinedAt: new Date().toISOString()
-                            }
-                        }));
-                    } catch(error) {
-                        request.log.error(
-                            {
-                                error,
-                                roomId,
-                                userId
-                            },
-                            'Failed to join room'
-                        );
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to join room'
-                        }));
-                    }
+                    joinRoom(connection, authUser, payload, request);
                     break;
                 }
 
                 case 'leave_room': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId } = payload as chatModel.LeaveRoomPayload;
-
-                    if (authUser.uid !== userId) {
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    const roomMember = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!roomMember) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'You are not a member of this room'
-                        }));
-                        return ;
-                    }
-
-                    // Validate room and user
-                    const room = await prisma.room.findUnique({ where: { id: roomId } });
-                    if (!room) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-                        return;
-                    }
-
-                    // Remove connection
-                    liveConnections[roomId]?.delete(connection);
-                    if (connection.userData?.rooms) {
-                        connection.userData.rooms.delete(roomId);
-                        if (connection.userData.rooms.size === 0) {
-                            delete connection.userData;
-                        }
-                    }
-
-                    await prisma.roomMember.delete({
-                        where: { userId_roomId: { userId, roomId } }
-                    });
-
-                    // Notify room members
-                    liveConnections[roomId]?.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN && ws.userData?.userId !== userId) {
-                            ws.send(JSON.stringify({
-                                type: 'member_left',
-                                payload: { roomId, userId }
-                            }));
-                        }
-                    });
-
-                    connection.send(JSON.stringify({ type: 'left', payload: { roomId, userId } }));
+                    leaveRoom(connection, authUser, payload, request);
                     break;
                 }
 
                 case 'delete_room': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId } = payload as chatModel.DeleteRoomPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    // Step 1: Check if room exists
-                    const room = await prisma.room.findUnique({
-                        where: { id: roomId }
-                    });
-                    if (!room) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Room not found'
-                        }));
-                        return;
-                    }
-
-                    // Step 2: Check membership and ownership
-                    const userMembership = await prisma.roomMember.findUnique({
-                        where: { userId_roomId: { userId: authUser.uid, roomId } }
-                    });
-
-                    if (!userMembership || userMembership.role !== 'OWNER') {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Only room owner can delete the room'
-                        }));
-                        return ;
-                    }
-
-                    // Step 3: Delete room
-                    await prisma.room.delete({
-                        where: { id: roomId }
-                    });
-
-                    // Step 4: Notify and clean up connections
-                    liveConnections[roomId]?.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN) {
-                            ws.send(JSON.stringify({
-                                type: 'room_removed',
-                                payload: { roomId }
-                            }));
-                        }
-                        ws.userData?.rooms?.delete(roomId);
-                        if (ws.userData?.rooms?.size === 0) {
-                            delete ws.userData;
-                        }
-                    });
-                    // Step 5: Confirm success to owner
-                    delete liveConnections[roomId];
-                    connection.send(JSON.stringify({
-                        type: 'room_deleted_success',
-                        payload: { roomId }
-                    }));
+                    deleteRoom(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'get_room_members': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId } = payload as chatModel.GetRoomMembersPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    try {
-                        const [roomMember, members] = await Promise.all([
-                            prisma.roomMember.findUnique({
-                                where: {
-                                    userId_roomId: {
-                                        userId: authUser.uid,
-                                        roomId
-                                    }
-                                }
-                            }),
-                            prisma.roomMember.findMany({
-                                where: { roomId },
-                                select: {
-                                    userId: true,
-                                    role: true,
-                                    joinedAt: true,
-                                    user: {
-                                        select: {
-                                            id: true,
-                                            name: true,
-                                            email: true,
-                                            status: true
-                                        }
-                                    }
-                                },
-                                orderBy: [
-                                    { role: 'asc' },
-                                    { joinedAt: 'asc' }
-                                ]
-                            })
-                        ]);
-
-                        if (!roomMember) {
-                            connection.send(JSON.stringify({
-                                type: 'error',
-                                message: 'Not a member of this room'
-                            }));
-                            return ;
-                        }
-    
-                        connection.send(JSON.stringify({
-                            type: 'room_members',
-                            payload: {
-                                roomId,
-                                members: members.map(m => ({
-                                    userId: m.userId,
-                                    role: m.role,
-                                    joinedAt: m.joinedAt,
-                                    user: m.user
-                                }))
-                            }
-                        }));
-
-                    } catch(error) {
-                        request.log.error(
-                            {
-                                error,
-                                roomId
-                            },
-                            'Failed to fetch room members'
-                        );
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to fetch room members'
-                        }));
-                    }
+                    getRoomMembers(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'kick_member': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId, targetUserId } = payload as chatModel.KickMemberPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    // Room-specific rate limiting for kick actions
-                    if (!checkRoomRateLimit(connection, roomId, 'kick', CONFIG.RATE_LIMITS.ROOM_KICKS_PER_MINUTE, windowMs)) { // 2 kicks per room per minute
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Room-specific rate limit exceeded for kick action'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ROOM_KICKS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-
-                    // Check general rate limit
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) { // 3 total admin actions per minute
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-
-                    // Check if user is admin/owner of this room
-                    const userMembership = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.uid,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!userMembership) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Not a member of this room'
-                        }));
-                        return ;
-                    }
-
-                    if (userMembership.role !== 'ADMIN' && userMembership.role !== 'OWNER') {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Insufficient permissions: Only admins can kick members'
-                        }));
-                        return ;
-                    }
-
-                    // Can't kick yourself
-                    if (authUser.uid === targetUserId) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Cannot kick yourself'
-                        }));
-                        return ;
-                    }
-
-                    // Check if the target user in the room
-                    const targetMembership = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: targetUserId,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!targetMembership) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Target is not a member of this room'
-                        }));
-                        return ;
-                    }
-
-                    // Can't kick owne
-                    if (targetMembership.role === 'OWNER') {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Cannot kick room owner'
-                        }));
-                        return ;
-                    }
-
-                    await prisma.roomMember.delete({
-                        where: {
-                            userId_roomId: {
-                                userId: targetUserId,
-                                roomId
-                            }
-                        }
-                    });
-
-                    // Notify and disconnect the kicked user's connections
-                    const targetConnections = userConnections.get(targetUserId) || new Set();
-                    targetConnections?.forEach((ws) => {
-                        if (ws.userData?.rooms.has(roomId)) {
-                            ws.send(JSON.stringify({
-                                type: 'kicked_from_room',
-                                payload: {
-                                    roomId,
-                                    kickedBy: authUser.uid,
-                                    reason: 'You have been removed from this room'
-                                }
-                            }));
-                            liveConnections[roomId]?.delete(ws);
-                            ws.userData.rooms.delete(roomId);
-                            if (ws.userData.rooms.size === 0) {
-                                delete ws.userData;
-                            }
-                        }
-                    });
-
-                    // Notify all room members
-                    liveConnections[roomId]?.forEach((ws) => {
-                        if (ws.readyState === WS.OPEN) {
-                            ws.send(JSON.stringify({
-                                type: 'member_kicked',
-                                payload: {
-                                    roomId,
-                                    kickedUserId: targetUserId,
-                                    kickedBy: authUser.uid
-                                }
-                            }));
-                        }
-                    });
-
-                    // Confirm to admin
-                    connection.send(JSON.stringify({
-                        type: 'member_kicked_success',
-                        payload: {
-                            roomId,
-                            kickedUserId: targetUserId
-                        }
-                    }));
+                    kickMember(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'promote_member': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.PROMOTE_MEMBER, windowMs)) { // 3 promotions per minute
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${maxRequests} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId, targetUserId, newRole } = payload as chatModel.PromoteMemberPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    // Validate new role
-                    const validRoles = ['MEMBER', 'ADMIN', 'OWNER'];
-                    if(!validRoles.includes(newRole)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Invalid role. valid roles MEMBER, ADMIN, OWNER'
-                        }));
-                        return ;
-                    }
-
-                    const userMembership = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.uid,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!userMembership) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Not a member of this room'
-                        }));
-                        return ;
-                    }
-                    
-                    if (userMembership.role !== 'ADMIN' && userMembership.role !== 'OWNER') {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Insufficient permissions: Only admins can promote members'
-                        }));
-                        return ;
-                    }
-
-                    // Check if target user is in the room
-                    const targetMembership = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: targetUserId,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!targetMembership) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'User is not a member of this room'
-                        }));
-                        return ;
-                    }
-                    
-                    // Only OWNER can promote to OWNER or demote from OWNER
-                    if ((newRole === 'OWNER' || targetMembership.role === 'OWNER') && userMembership.role !== 'OWNER') {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Only room owner can change owner status'
-                        }));
-                        return ;
-                    }
-
-                    // Can't change ur own role
-                    if (authUser.uid === targetUserId) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Cannot change your own role'
-                        }));
-                        return ;
-                    }
-
-                    try {
-
-                        // Special case: If promoting to OWNER, demote cureent owner to ADMIN
-                        if (newRole === 'OWNER') {
-                            await prisma.roomMember.update({
-                                where: {
-                                    userId_roomId: {
-                                        userId: authUser.uid,
-                                        roomId
-                                    }
-                                },
-                                data: {
-                                    role: 'ADMIN'
-                                }
-                            });
-                        }
-
-                        // Update the target user's role
-                        const updatedMember = await prisma.roomMember.update({
-                            where: {
-                                userId_roomId: {
-                                    userId: targetUserId,
-                                    roomId
-                                }
-                            },
-                            data: {
-                                role: newRole
-                            }
-                        });
-
-                        // Notify all room members
-                        liveConnections[roomId]?.forEach((ws) => {
-                            if (ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({
-                                    type: 'member_role_changed',
-                                    payload: {
-                                        roomId,
-                                        userId: targetUserId,
-                                        newRole,
-                                        changedBy: authUser.uid
-                                    }
-                                }));
-                            }
-                        });
-
-                        // Notify the promoted user across all their connections
-                        const targetConnections = userConnections.get(targetUserId) || new Set();
-                        targetConnections?.forEach((ws) => {
-                            if (ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({
-                                    type: 'member_role_changed',
-                                    payload: {
-                                        roomId,
-                                        userId: targetUserId,
-                                        newRole,
-                                        changedBy: authUser.uid
-                                    }
-                                }));
-                            }
-                        });
-
-                        // Confirm to admin
-                        connection.send(JSON.stringify({
-                            type: 'member_role_changed',
-                            payload: {
-                                roomId,
-                                userId: targetUserId,
-                                newRole,
-                                oldRole: targetMembership.role
-                            }
-                        }));
-                    } catch(error) {
-                        request.log.error(
-                            {
-                                error,
-                                roomId,
-                                targetUserId,
-                                newRole
-                            },
-                            'Failed to promote member'
-                        );
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to update member role'
-                        }));
-                    }
+                    promoteMember(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'send_message': {
-                    if (!checkRateLimit(connection, maxRequests, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${maxRequests} requests in ${windowMs / 1000}s`);
-                        return ;
-                    }
-
-                    const { roomId, senderId, text } = payload as chatModel.SendMessagePayload;
-
-                    if (authUser.uid !== senderId) {
-                        request.log.warn({ type, senderId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    // Validate message content
-                    if (!text || text.trim().length === 0) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Message content cannot be empty'
-                        }));
-                        return ;
-                    }
-
-                    if (text.length > CONFIG.MESSAGE.MAX_LENGTH) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: `Message too long (max ${CONFIG.MESSAGE.MAX_LENGTH} characters)`
-                        }));
-                        return ;
-                    }
-
-                    try {
-                        const roomMember = await prisma.roomMember.findUnique({
-                            where: {
-                                userId_roomId: {
-                                    userId: authUser.uid,
-                                    roomId
-                                }
-                            },
-                            include: {
-                                room: {
-                                    select: {
-                                        id: true,
-                                        name: true
-                                    }
-                                }
-                            }
-                        });
-
-                        if (!roomMember || !roomMember.room) {
-                            connection.send(JSON.stringify({
-                                type: 'error',
-                                message: 'Not a member of this room or room not found'
-                            }));
-                            return ;
-                        }
-
-                        const sanitizedText = escapeHtml(text.trim());
-
-                        // Persist message
-                        const message = await prisma.message.create({
-                            data: {
-                                content: sanitizedText,
-                                senderId,
-                                roomId
-                            }
-                        });
-
-                        // Broadcast to room
-                        liveConnections[roomId]?.forEach((ws) => {
-                            if (ws.readyState === WS.OPEN) {
-                                ws.send(
-                                    JSON.stringify({
-                                        type: 'message',
-                                        payload: {
-                                            id: message.id,
-                                            roomId,
-                                            senderId,
-                                            text: sanitizedText,
-                                            createdAt: message.createdAt,
-                                        },
-                                    })
-                                );
-                            }
-                        });
-                    } catch(error) {
-                        request.log.error(
-                            {
-                                error,
-                                senderId,
-                                roomId
-                            },
-                            'Failed to send message'
-                        );
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to send message'
-                        }));
-                    }
+                    sendMessage(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'get_messages': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId, limit = 50, offset = 0 } = payload as chatModel.GetMessagePayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    const roomMember = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.uid,
-                                roomId
-                            }
-                        },
-                        include: { room: true }
-                    });
-
-                    if (!roomMember) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Not a member of this room'
-                        }));
-
-                        return ;
-                    }
-
-                    // Validate room
-                    const room = roomMember.room;
-                    if (!room) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-                        return;
-                    }
-
-                    const messages = await prisma.message.findMany({
-                        where: { roomId },
-                        include: { sender: true, receiver: true },
-                        orderBy: { createdAt: 'asc' },
-                        skip: offset,
-                        take: limit,
-                    });
-
-                    connection.send(JSON.stringify({ type: 'messages', payload: messages }));
+                    getMessages(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'get_more_messages': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { roomId, userId, limit = 10, reset = false } = payload as chatModel.GetMoreMessagesPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    const roomMember = await prisma.roomMember.findUnique({
-                        where: {
-                            userId_roomId: {
-                                userId: authUser.uid,
-                                roomId
-                            }
-                        }
-                    });
-
-                    if (!roomMember) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Not a member of this room'
-                        }));
-
-                        return ;
-                    }
-
-                    // Initialize client tracking
-                    if (!clientOffsets.has(connection)) {
-                        clientOffsets.set(connection, { offsets: new Map(), lastAccess: Date.now() });
-                    }
-                    const clientData = clientOffsets.get(connection)!;
-                    clientData.lastAccess = Date.now();
-
-                    // const roomOffsets = clientOffsets.get(connection)!;
-
-                    // Handle reset - set offset to 0 if requested
-                    let offset = clientData.offsets.get(roomId) ?? 0;
-                    if (reset) {
-                        offset = 0;
-                        clientData.offsets.set(roomId, 0);
-                    }
-                    
-                    // Validate room
-                    const room = await prisma.room.findUnique({ where: { id: roomId } });
-                    if (!room) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-                        return;
-                    }
-
-                    try {
-                        // Fetch the next batch of messages
-                        const messages = await prisma.message.findMany({
-                            where: { roomId },
-                            include: { sender: true, receiver: true },
-                            orderBy: { createdAt: 'asc' },
-                            skip: offset,
-                            take: limit
-                        });
-    
-                        // Update offset for next request
-    
-                        // roomOffsets.set(roomId, offset + messages.length);
-                        clientData.offsets.set(roomId, offset + messages.length);
-    
-                        // Send messages to client
-                        connection.send(JSON.stringify({ type: 'more_messages', payload: messages }));
-                    } catch(error) {
-                        request.log.error(
-                            {
-                                error,
-                                roomId
-                            }
-                        );
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to fetch messages'
-                        }));
-                    }
+                    getMoreMessages(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'send_direct_message': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.MESSAGES_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.MESSAGES_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return ;
-                    }
-
-                    const { senderId, receiverId, text } = payload as chatModel.DirectMessagePayload;
-
-                    if (authUser.uid !== senderId) {
-                        request.log.warn({ type, senderId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    // Validate sender and receiver
-                    const [sender, receiver] = await Promise.all([
-                        prisma.user.findUnique({ where: { id: senderId } }),
-                        prisma.user.findUnique({ where: { id: receiverId } }),
-                    ]);
-                    if (!sender || !receiver) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Sender or receiver not found' }));
-                        return;
-                    }
-                    if (senderId === receiverId) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'Cannot send message to yourself' }));
-                        return;
-                    }
-
-                    try {
-                        const sanitizedText = escapeHtml(text);
-
-                        // Persist message
-                        const message = await prisma.message.create({
-                            data: { content: sanitizedText, senderId, receiverId },
-                        });
-    
-                        // Send to receiver's connections
-                        const receiverConnections = userConnections.get(receiverId) || new Set();
-                        receiverConnections.forEach((ws) => {
-                            if (ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({
-                                    type: 'direct_message',
-                                    payload: {
-                                        id: message.id,
-                                        senderId,
-                                        receiverId,
-                                        text: sanitizedText,
-                                        createdAt: message.createdAt,
-                                    }
-                                }));
-                            }
-                        });
-    
-                        // Confirm to sender
-                        connection.send(JSON.stringify({ type: 'direct_message_sent', payload: message }));
-                    } catch(error) {
-                        request.log.error(
-                            {
-                                error,
-                                senderId,
-                                receiverId
-                            },
-                            'Failed to send direct message'
-                        );
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to send direct message'
-                        }));
-                    }
+                    sendDirectMessage(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'edit_message': {
-                    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.EDITS_PER_10_SECONDS, 10000)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        return ;
-                    }
-
-                    const { messageId, newText, userId } = payload as chatModel.EditMessagePayload;
-
-                    // Verify user is authenticated and matches
-                    if (authUser.uid !== userId) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: User ID mismatch'
-                        }));
-                        return ;
-                    }
-
-                    // Validate message exists and get room info
-                    const message = await prisma.message.findUnique({
-                        where: {
-                            id: messageId
-                        },
-                        include: {
-                            room: { include: { members: true } },
-                            sender: true
-                        }
-                    });
-
-                    if (!message) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Message not found'
-                        }));
-                        return ;
-                    }
-
-                    // Check if user is the message sender
-                    if (message.sender.id !== authUser.uid) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: Can only edit your own messages'
-                        }));
-                        return ;
-                    }
-
-                    // For room messages, verify user is still a room member
-                    if (message.roomId) {
-                        const roomMember = await prisma.roomMember.findUnique({
-                            where: {
-                                userId_roomId: {
-                                    userId: authUser.uid,
-                                    roomId: message.roomId
-                                }
-                            }
-                        });
-    
-                        if (!roomMember) {
-                            connection.send(JSON.stringify({
-                                type: 'error',
-                                message: 'Not a member of this room'
-                            }));
-                            return ;
-                        }
-                    }
-
-                    // Check if message is too old to edit (e.g., 24 hours)
-                    const messageAge = Date.now() - message.createdAt.getTime();
-                    const maxEditAge = CONFIG.MESSAGE.EDIT_WINDOW_HOURS * 60 * 60 * 1000;
-                    if (messageAge > maxEditAge) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Message is too old to edit (max 24 hours)'
-                        }));
-                        return ;
-                    }
-
-                    // Validate new text
-                    if (!newText || newText.trim().length === 0) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Message content cannot be empty'
-                        }));
-                        return ;
-                    }
-
-                    if (newText.length > CONFIG.MESSAGE.MAX_LENGTH) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: `Message max length is ${CONFIG.MESSAGE.MAX_LENGTH} characters`
-                        }));
-                        return ;
-                    }
-
-                    try {
-                        const sanitizedText = escapeHtml(newText.trim());
-
-                        // Update the message
-                        const updatedMessage = await prisma.message.update({
-                            where: {
-                                id: messageId
-                            },
-                            data: {
-                                content: sanitizedText,
-                                updatedAt: new Date()
-                            },
-                            include: {
-                                sender: true,
-                                receiver: true
-                            }
-                        });
-
-                        // Broadcast the edit to relevant connections
-                        if (message.roomId) {
-                            // Room message - broadcast to all room members
-                            liveConnections[message.roomId]?.forEach((ws) => {
-                                if (ws.readyState == WS.OPEN && ws !== connection) {
-                                    ws.send(JSON.stringify({
-                                        type: 'message_edited',
-                                        payload: {
-                                            messageId: updatedMessage.id,
-                                            roomId: message.roomId,
-                                            senderId: updatedMessage.senderId,
-                                            newText: updatedMessage.content,
-                                            editedAt: updatedMessage.updatedAt,
-                                            senderName: updatedMessage.sender.name
-                                        }
-                                    }));
-                                }
-                            });
-                        } else if(message.receiverId) {
-                            // Direct message - notify both sender and receiver
-                            const targetUsers = [message.senderId, message.receiverId];
-                            const targetConnections = targetUsers.flatMap((id): ExtendedWS[] => Array.from(userConnections.get(id) || new Set()));
-                            targetConnections.forEach((ws) => {
-                                if (ws.readyState === WS.OPEN) {
-                                    ws.send(JSON.stringify({
-                                        type: 'direct_message_edited',
-                                        payload: {
-                                            messageId: updatedMessage.id,
-                                            senderId: updatedMessage.senderId,
-                                            receiverId: updatedMessage.receiverId,
-                                            newText: updatedMessage.content,
-                                            editedAt: updatedMessage.updatedAt,
-                                        }
-                                    }));
-                                }
-                            });
-                        }
-
-                        // Confirm to the editor
-                        connection.send(JSON.stringify({
-                            type: 'message_edit_success',
-                            payload: {
-                                messageId: updatedMessage.id,
-                                newText: updatedMessage.content,
-                                editedAt: updatedMessage.updatedAt
-                            }
-                        }));
-                    } catch (error) {
-                        request.log.error({ error, messageId, userId: authUser.uid }, 'Failed to edit message');
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Failed to edit message'
-                        }));
-                    }
+                    editMessage(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'delete_message': {
-                    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.DELETED_MESSAGES_PER_MINUTE, 60000)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        return ;
-                    }
-
-                    const { messageId, userId } = payload as { messageId: string, userId: string };
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: Cannot delete message as another user'
-                        }));
-                        return ;
-                    }
-
-                    const message = await prisma.message.findUnique({
-                        where: { id: messageId },
-                        include: { room: { include: { members: true } }, sender: true }
-                    });
-                    if (!message) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Message not found'
-                        }));
-                        return ;
-                    }
-
-                    if(message.sender.id !== authUser.uid) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: Can only delete your own messages'
-                        }));
-                        return ;
-                    }
-
-                    if (message.roomId) {
-                        const roomMember = await prisma.roomMember.findUnique({
-                            where: {
-                                userId_roomId: {
-                                    userId: authUser.uid,
-                                    roomId: message.roomId
-                                }
-                            }
-                        });
-                        if (!roomMember) {
-                            connection.send(JSON.stringify({
-                                type: 'error',
-                                message: 'Not a member of this room'
-                            }));
-                            return ;
-                        }
-                    }
-
-                    await prisma.message.delete({
-                        where: { id: messageId }
-                    });
-                    if (message.roomId) {
-                        liveConnections[message.roomId]?.forEach((ws) => {
-                            if(ws.readyState === WS.OPEN && ws !== connection) {
-                                ws.send(JSON.stringify({
-                                    type: 'message_deleted',
-                                    payload: {
-                                        messageId,
-                                        roomId: message.roomId,
-                                        deletedBy: authUser.uid
-                                    }
-                                }));
-                            }
-                        });
-                    } else if (message.receiverId) {
-                        const targetUsers = [message.senderId, message.receiverId];
-                        const targetConnections = targetUsers.flatMap((id): ExtendedWS[] => Array.from(userConnections.get(id) || new Set()));
-                        targetConnections.forEach((ws) => {
-                            if(ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({
-                                    type: 'direct_message_deleted',
-                                    payload: { messageId, deletedBy: authUser.uid }
-                                }));
-                            }
-                        });
-                    }
-                    connection.send(JSON.stringify({
-                        type: 'message_delete_success',
-                        payload: { messageId, deletedBy: authUser.uid }
-                    }));
+                    deleteMessage(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'update_status': {
-                    if (!checkRateLimit(connection, CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE, windowMs)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        request.log.warn(`Rate limit reached: userId=${authUser.uid} | ${CONFIG.RATE_LIMITS.ADMIN_ACTIONS_PER_MINUTE} requests in ${windowMs / 1000}s`);
-                        return;
-                    }
-                    const { userId, status } = payload as chatModel.UpdateUserStatusPayload;
-
-                    if (userId !== authUser.uid) {
-                        request.log.warn({ type, userId, authUserId: authUser.uid }, 'User ID mismatch attempt');
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Unauthorized: User ID mismatch'
-                        }));
-                        return ;
-                    }
-
-                    const validStatuses = ['IN_GAME', 'OFFLINE', 'ONLINE', 'BUSY']; // 'AWAY
-                    if (!validStatuses.includes(status)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Invalid status. Valid statuses: IN_GAME, OFFLINE, ONLINE, BUSY'
-                        }));
-                        return ;
-                    }
-
-                    // Persist status to database
-                    await prisma.user.update({
-                        where: { id: userId },
-                        data: { status }
-                    });
-
-                    // Update status in database or notify relevant users
-                    const userRooms = await prisma.roomMember.findMany({
-                        where: { userId }
-                    });
-
-                    // Notify users
-                    userRooms.forEach((room) => {
-                        liveConnections[room.roomId]?.forEach((ws) => {
-                            if (ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({
-                                    type: 'user_status',
-                                    payload: { userId, status }
-                                }));
-                            }
-                        });
-                    });
-
-                    // Confirm to sender
-                    connection.send(JSON.stringify({
-                        type: 'status_updated',
-                        payload: { userId, status }
-                    }));
-
+                    updateStatus(connection, type, authUser, payload, request);
                     break;
                 }
 
                 case 'typing': {
-                    if(!checkRateLimit(connection, CONFIG.RATE_LIMITS.TYPING_PER_10_SECONDS, 10000)) {
-                        connection.send(JSON.stringify({
-                            type: 'error',
-                            message: 'Rate limit exceeded, please try again later'
-                        }));
-                        return ;
-                    }
-
-                    const { userId, status, roomId, receiverId } = payload as chatModel.TypingPayload;
-
-                    if (authUser.uid !== userId) {
-                        connection.send(JSON.stringify({ 
-                            type: 'error', 
-                            message: 'Unauthorized: User ID mismatch' 
-                        }));
-                        return;
-                    }
-
-                    // Validate user
-                    const user = await prisma.user.findUnique({ where: { id: userId } });
-                    if (!user) {
-                        connection.send(JSON.stringify({ type: 'error', message: 'User not found' }));
-                        return;
-                    }
-
-                    if (roomId) {
-                        // Validate room
-                        const room = await prisma.room.findUnique({ where: { id: roomId } });
-                        if (!room) {
-                            connection.send(JSON.stringify({ type: 'error', message: 'Room not found' }));
-                            return;
-                        }
-
-                        const roomMember = await prisma.roomMember.findUnique({
-                            where: {
-                                userId_roomId: {
-                                    userId: authUser.uid,
-                                    roomId
-                                }
-                            }
-                        });
-
-                        if (!roomMember) {
-                            connection.send(JSON.stringify({
-                                type: 'error',
-                                message: 'Not a member of this room'
-                            }));
-
-                            return ;
-                        }
-
-                        // Broadcast typing status to room
-                        liveConnections[roomId]?.forEach((ws) => {
-                            if (ws !== connection && ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({ type: 'typing', payload: { userId, roomId, status } }));
-                            }
-                        });
-                    } else if (receiverId) {
-                        // Validate receiver
-                        const receiver = await prisma.user.findUnique({ where: { id: receiverId } });
-                        if (!receiver) {
-                            connection.send(JSON.stringify({ type: 'error', message: 'Receiver not found' }));
-                            return;
-                        }
-
-                        const receiverConnections = userConnections.get(receiverId) || new Set();
-                        receiverConnections.forEach((ws) => {
-                            if (ws.readyState === WS.OPEN) {
-                                ws.send(JSON.stringify({
-                                    type: 'typing',
-                                    payload: {
-                                        userId,
-                                        receiverId,
-                                        status
-                                    }
-                                }));
-                            }
-                        });
-                    }
+                    typing(connection, type, authUser, payload, request);
                     break;
                 }
 

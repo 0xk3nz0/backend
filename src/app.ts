@@ -12,6 +12,7 @@ import FriendRoutes from './routes/friend.js';
 import AuthRoutes from './routes/auth.js';
 import TOTPRoutes from './routes/totp.js';
 import ChatRoutes from './routes/chat.js';
+import GameRoutes from './routes/game.js'
 
 import JWTAuthenticationPlugin from './plugins/jwt.js';
 import {facebookOAuthOpts, googleOAuthOpts} from "./auth/clients.js";
@@ -45,6 +46,10 @@ const routes = [
     {
         pcb: ChatRoutes,
         opt: { prefix: '/v1' }
+    },
+    {
+        pcb: GameRoutes,
+        opt: { prefix: '/v1/game'}
     }
 ]
 
@@ -60,7 +65,7 @@ const secrets = {
 };
 
 const app: Server = new Server(
-    '0.0.0.0', 3000,
+    '0.0.0.0', 3002,
     [
         googleOAuthOpts,
         facebookOAuthOpts

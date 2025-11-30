@@ -1,2 +1,5 @@
-###
-GET ws://localhost:3000/v1/ws/chat/room1 HTTP/1.1
+### WebSocket Game Connection
+WEBSOCKET ws://localhost:3000/ws/game
+
+### Send a test message
+{"type": "ping"}
